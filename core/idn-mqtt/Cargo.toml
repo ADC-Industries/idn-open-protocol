@@ -1,0 +1,18 @@
+[package]
+name = "idn-mqtt"
+description = "The MQTT 5 broker IDN's Site Managers run (IDN Industrial's for the application server, IDN Media's for a site's control: spec/extensions/idn-industrial.md §I.7, idn-node.md §N.34)"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+publish = false
+
+[dependencies]
+idn-open-protocol = { path = "../idn-open-protocol" }
+bytes = "1"
+redb = "4"
+rumqttc = { version = "0.25", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
+idn-common = { path = "../idn-common" }

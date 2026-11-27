@@ -1,0 +1,20 @@
+[package]
+name = "idn-aoip-device"
+version = "0.3.8"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+description = "Being a device on a network of Dante-compatible equipment (unofficial; not made, authorised or supported by Audinate): IDN's own implementation from its clean-room specs (idn-aoip-control.md and idn-aoip-device.md)"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+libc = "0.2"
+idn-common = { path = "../idn-common" }
+# Its DNS encoder and parser (mDNS, §2).
+idn-open-protocol = { path = "../idn-open-protocol" }
+socket2 = { version = "0.6.5", features = ["all"] }
+
+[target.'cfg(windows)'.dependencies]
+# WSAPoll (the receiving thread's wait) and WSAIoctl (no "connection reset" reads).
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock", "Win32_System_IO"] }

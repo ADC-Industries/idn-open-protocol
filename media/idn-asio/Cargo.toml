@@ -1,0 +1,33 @@
+[package]
+name = "idn-asio"
+description = "IDN as an ASIO driver (Windows, and Linux for cwASIO hosts): any ASIO program's outputs as an IDN source, the routing matrix's sound as its inputs"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[lib]
+# The driver is a DLL (idn_asio.dll) on Windows, a shared library (libidn_asio.so) on
+# Linux; the library form is for the tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+idn-open-protocol = { path = "../../core/idn-open-protocol" }
+serde_json = "1"
+# The ASIO interface the driver object implements (IDN's own, from cwASIO's MIT headers;
+# no Steinberg SDK).
+idn-asio-abi = { path = "../../core/idn-asio-abi" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_System_Registry", "Win32_System_LibraryLoader",
+    "Win32_System_Threading", "Win32_System_Com", "Win32_Media",
+] }
+
+# Linux: cwASIO's entry points (its own path for the list, error numbers, the monotonic
+# clock). The version the workspace already uses.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.191"

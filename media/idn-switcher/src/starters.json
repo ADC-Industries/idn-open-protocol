@@ -1,0 +1,307 @@
+[
+ {
+  "name": "Sunday service",
+  "about": "A lower third (name and role), a Starting soon slate with a countdown, a Be right back slate, a 10-minute countdown and a service's cue list. Add your cameras and slides as inputs, then set the cues' actions.",
+  "inputs": [
+   {
+    "label": "Lower third",
+    "title": {
+     "layers": [
+      {
+       "type": "box",
+       "rect": [
+        0.05,
+        0.74,
+        0.5,
+        0.14
+       ],
+       "colour": "#14171cd9",
+       "radius": 0.02
+      },
+      {
+       "type": "text",
+       "rect": [
+        0.075,
+        0.752,
+        0.46,
+        0.07
+       ],
+       "text": "{name}",
+       "size": 0.05,
+       "bold": true,
+       "colour": "#ffffff"
+      },
+      {
+       "type": "text",
+       "rect": [
+        0.075,
+        0.815,
+        0.46,
+        0.055
+       ],
+       "text": "{role}",
+       "size": 0.034,
+       "colour": "#d0d4dc"
+      }
+     ],
+     "fields": {
+      "name": "Pastor Sam",
+      "role": "Lead pastor"
+     }
+    }
+   },
+   {
+    "label": "Starting soon",
+    "title": {
+     "layers": [
+      {
+       "type": "box",
+       "rect": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "colour": "#101418ff"
+      },
+      {
+       "type": "text",
+       "rect": [
+        0.1,
+        0.3,
+        0.8,
+        0.14
+       ],
+       "text": "{welcome}",
+       "size": 0.075,
+       "bold": true,
+       "align": "center",
+       "colour": "#ffffff"
+      },
+      {
+       "type": "text",
+       "rect": [
+        0.1,
+        0.48,
+        0.8,
+        0.1
+       ],
+       "text": "Starting in {timer:Start}",
+       "size": 0.05,
+       "align": "center",
+       "colour": "#d0d4dc"
+      }
+     ],
+     "fields": {
+      "welcome": "Welcome"
+     }
+    }
+   },
+   {
+    "label": "Be right back",
+    "title": {
+     "layers": [
+      {
+       "type": "box",
+       "rect": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "colour": "#101418ff"
+      },
+      {
+       "type": "text",
+       "rect": [
+        0.1,
+        0.42,
+        0.8,
+        0.16
+       ],
+       "text": "We’ll be right back",
+       "size": 0.08,
+       "bold": true,
+       "align": "center",
+       "colour": "#ffffff"
+      }
+     ]
+    }
+   }
+  ],
+  "timers": [
+   {
+    "name": "Start",
+    "action": "set",
+    "mode": "down",
+    "seconds": 600
+   }
+  ],
+  "show": {
+   "name": "Sunday service",
+   "cues": [
+    {
+     "name": "Pre-service",
+     "notes": "The countdown before the service.",
+     "actions": [
+      {
+       "do": "switcher",
+       "command": "program",
+       "body": {
+        "input": "Starting soon"
+       }
+      },
+      {
+       "do": "switcher",
+       "command": "timer",
+       "body": {
+        "name": "Start",
+        "action": "start"
+       }
+      }
+     ]
+    },
+    {
+     "name": "Welcome",
+     "notes": "Cut to the camera on whoever welcomes."
+    },
+    {
+     "name": "Worship",
+     "notes": "The band's camera; slides with the words."
+    },
+    {
+     "name": "Announcements",
+     "notes": "Slides, or the announcements video."
+    },
+    {
+     "name": "Message",
+     "notes": "The speaker's camera; show the Lower third with their name (a layer of the speaker's scene)."
+    },
+    {
+     "name": "Closing",
+     "notes": "The closing song or prayer."
+    },
+    {
+     "name": "Be right back",
+     "notes": "If something goes wrong: the slate while you fix it.",
+     "actions": [
+      {
+       "do": "switcher",
+       "command": "program",
+       "body": {
+        "input": "Be right back"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "Simple stream",
+  "about": "A lower third and a Be right back slate, and a two-cue show. Add your camera as an input.",
+  "inputs": [
+   {
+    "label": "Lower third",
+    "title": {
+     "layers": [
+      {
+       "type": "box",
+       "rect": [
+        0.05,
+        0.74,
+        0.5,
+        0.14
+       ],
+       "colour": "#14171cd9",
+       "radius": 0.02
+      },
+      {
+       "type": "text",
+       "rect": [
+        0.075,
+        0.752,
+        0.46,
+        0.07
+       ],
+       "text": "{name}",
+       "size": 0.05,
+       "bold": true,
+       "colour": "#ffffff"
+      },
+      {
+       "type": "text",
+       "rect": [
+        0.075,
+        0.815,
+        0.46,
+        0.055
+       ],
+       "text": "{role}",
+       "size": 0.034,
+       "colour": "#d0d4dc"
+      }
+     ],
+     "fields": {
+      "name": "Pastor Sam",
+      "role": "Lead pastor"
+     }
+    }
+   },
+   {
+    "label": "Be right back",
+    "title": {
+     "layers": [
+      {
+       "type": "box",
+       "rect": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "colour": "#101418ff"
+      },
+      {
+       "type": "text",
+       "rect": [
+        0.1,
+        0.42,
+        0.8,
+        0.16
+       ],
+       "text": "We’ll be right back",
+       "size": 0.08,
+       "bold": true,
+       "align": "center",
+       "colour": "#ffffff"
+      }
+     ]
+    }
+   }
+  ],
+  "timers": [],
+  "show": {
+   "name": "Simple stream",
+   "cues": [
+    {
+     "name": "Live",
+     "notes": "Cut to the camera."
+    },
+    {
+     "name": "Be right back",
+     "notes": "The slate while you fix something.",
+     "actions": [
+      {
+       "do": "switcher",
+       "command": "program",
+       "body": {
+        "input": "Be right back"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ }
+]

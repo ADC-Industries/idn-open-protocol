@@ -1,0 +1,50 @@
+# The workspace, by edition (README.md, "Layout"):
+#   core/        the protocol library and what both editions share (codecs, FFmpeg)
+#   media/       the media edition: Node, Site Manager, switcher, mixer, sound, display, OBS
+#   industrial/  IDN Industrial
+#   tools/       ADC Industries' own tools (signing releases, the user guide as pages)
+# The FFmpeg adapter (`codec/1`) and the OBS Studio plugin are separate crates, so the
+# library itself builds without FFmpeg or libobs; build them with `cargo build -p
+# idn-ffmpeg` / `cargo build -p idn-obs`.
+[workspace]
+resolver = "3"
+members = [
+    "core/idn-common", "core/idn-aoip-device", "core/idn-input", "core/idn-dsp", "core/idn-feeds", "core/idn-open-protocol", "core/idn-ffmpeg", "core/idn-shq-gpu", "core/idn-omt", "core/idn-mqtt", "core/idn-voice", "core/idn-voice-client", "core/idn-asio-abi",
+    "media/idn-node", "media/idn-site-manager", "media/idn-data", "media/idn-captions", "media/idn-switcher", "media/idn-mixer", "media/idn-iem",
+    "media/idn-plugin-host", "media/idn-audio-plugins", "media/idn-audio", "media/idn-asio", "media/idn-display",
+    "media/idn-vcam", "media/idn-camera-source", "media/idn-obs", "media/idn-obs-loader", "media/idn-aoip", "media/idn-cli", "media/idn-voice-app",
+    "industrial/idn-industrial",
+    "tools/idn-release", "tools/idn-guide",
+]
+default-members = ["core/idn-open-protocol"]
+
+[profile.dev]
+# Line numbers only: backtraces keep file:line. Full debug info made each test program
+# over 100 MB (target/debug reached 46 GB).
+debug = "line-tables-only"
+
+# No debug info for the dependencies (ours keep line tables): a full test build wrote so
+# much that the host's disk stalled other services (2026-11-20; a full build's load went
+# from ~130 to ~8 this way).
+[profile.dev.package."*"]
+debug = false
+
+# quinn-proto with one patch for the NDI QUIC profile, cpal with one for ALSA capture
+# buffers, whisper-rs-sys with MinGW links and a Vulkan loader opened at run time
+# (vendor/README.md). ASIO is IDN's own (core/idn-asio-abi, from cwASIO; 2026-11-25): no
+# Steinberg SDK, no asio-sys.
+[patch.crates-io]
+quinn-proto = { path = "vendor/quinn-proto" }
+cpal = { path = "vendor/cpal" }
+whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
+rubato = { path = "vendor/rubato" }
+
+# IDN Industrial's Windows programs (scripts/package.sh): smaller, as their installer goes
+# to plant PCs, often over slow links. Link-time optimisation, one code unit, no unwind
+# tables. Their work is I/O, not pictures: speed doesn't suffer for it.
+[profile.industrial]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+opt-level = "s"
+strip = "symbols"

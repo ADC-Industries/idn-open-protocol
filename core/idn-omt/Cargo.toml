@@ -1,0 +1,16 @@
+[package]
+name = "idn-omt"
+description = "Open Media Transport (OMT) for IDN: sources and receivers in Rust, the VMX codec (libvmx, vendored), and the bridge between OMT and IDN"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-common = { path = "../idn-common" }
+idn-open-protocol = { path = "../idn-open-protocol" }
+
+[build-dependencies]
+cc = "1"

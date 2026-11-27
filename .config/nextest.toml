@@ -1,0 +1,75 @@
+# cargo-nextest (scripts/dev/test-all.sh): every test in a process of its own, the test
+# programs side by side. `cargo test` ran the 126 programs one after another, ~11 min of a
+# 12-min release run spent waiting on connections and timeouts with the CPU near idle.
+# Doc tests aren't run by nextest: test-all.sh runs `cargo test --doc` beside it.
+# A crate's integration tests are one program, `all` (tests/all/main.rs, a module per former
+# file, 2026-11-20): filters name the module as `test(/^module::/)`.
+
+[profile.default]
+# Flaky tests show, never retried away.
+retries = 0
+fail-fast = false
+# The tests mostly wait (sockets, keyframes, timeouts); some load the CPU (encoders, 4K,
+# the mixer's real-time lanes) and others' timing suffers from that load.
+test-threads = 8
+# Named after 60 s, stopped after 5 min (a hung test doesn't hold the run).
+slow-timeout = { period = "60s", terminate-after = 5 }
+status-level = "fail"
+final-status-level = "slow"
+failure-output = "final"
+
+# Per-test times, for finding the slow ones (target/nextest/<profile>/junit.xml).
+[profile.default.junit]
+path = "junit.xml"
+
+[test-groups]
+# Devices made and used at once crashed the test process now and then (RADV): idn-switcher's
+# GPU tests run one at a time (as its GPU_TESTS lock did within one process).
+gpu = { max-threads = 1 }
+# The mixer lanes' real-time tests load the CPU or are upset by that load (as the
+# REAL_TIME lock did within one process).
+real-time = { max-threads = 1 }
+# idn-ffmpeg's player and gateway tests record, encode and play in real time (a fixture is
+# a 4 s recording through the encoders): beside the rest in a debug build, they fell behind
+# (keyframes 2.7 s apart, a seek late). Two at a time.
+ffmpeg-media = { max-threads = 2 }
+# Tests that time a network path or a callback rate (idn-cli's api_output, send_recv and
+# hx_loopback, the ASIO driver's): at a run's start, beside the heavy first tests, they
+# failed now and then (4 of 8 debug passes on 2026-11-19), every time passing alone. One
+# at a time among themselves; their assertions also measure the steady state only.
+net-timing = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(idn-switcher) & test(/gpu/)'
+test-group = 'gpu'
+
+[[profile.default.overrides]]
+filter = 'package(idn-open-protocol) & kind(lib) & test(/^audio::mixer::tests::/)'
+test-group = 'real-time'
+
+[[profile.default.overrides]]
+filter = 'package(idn-ffmpeg) & binary(all) & test(/^(player|gateway)::/)'
+test-group = 'ffmpeg-media'
+
+# The router's stray-picture test loads four cores on purpose (bug run I5-7): one at a time
+# with the other real-time tests.
+[[profile.default.overrides]]
+filter = 'package(idn-open-protocol) & binary(all) & test(/^router::.*(old_source|no_picture_of_the_old_source)/)'
+test-group = 'real-time'
+
+[[profile.default.overrides]]
+filter = '(package(idn-cli) & binary(all) & test(/^(api_output|send_recv|hx_loopback)::/)) | (package(idn-asio) & binary(driver))'
+test-group = 'net-timing'
+
+# The Node's routed-lane test plays 7 s in real time (2 ms blocks): beside a heavy build or
+# tests it heard a start missing (2026-11-19), passing alone. With the real-time ones.
+[[profile.default.overrides]]
+filter = 'package(idn-node) & binary(all) & test(/^routing::a_routed_lane_starts_and_stops/)'
+test-group = 'real-time'
+
+# The IEM receiver's loss test plays a tone through a lossy relay in real time and checks
+# no 5 ms of it went quiet: at a debug run's start, beside the rest, it heard a gap (15% of
+# the level, 2026-11-19), passing alone. With the real-time ones.
+[[profile.default.overrides]]
+filter = 'package(idn-iem) & binary(receiver) & test(/loss_reordering_and_a_dark_path/)'
+test-group = 'real-time'

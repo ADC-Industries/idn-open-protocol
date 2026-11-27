@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IDN Output</title>
+<link rel="stylesheet" href="/ui/base.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body class="console" data-header="X-IDN-OBS" data-who="OBS plugin">
+<header class="top">
+  <div class="brand">IDN Output</div>
+  <div id="status" class="dim">…</div>
+</header>
+<main>
+  <section class="card">
+    <div class="row">
+      <label class="bigcheck"><input id="enabled" type="checkbox"> <span>Send OBS's program to the network</span></label>
+    </div>
+    <div id="live" class="dim mt8"></div>
+    <div id="error" class="error mt8" hidden></div>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <label class="bigcheck"><input id="preview_enabled" type="checkbox"> <span>Also send the preview (studio mode's preview scene; the current scene outside studio mode)</span></label>
+    </div>
+    <label>Its name <input id="preview_name" maxlength="100"></label>
+    <div id="p-live" class="dim mt8"></div>
+    <div id="p-error" class="error mt8" hidden></div>
+  </section>
+
+  <section class="card">
+    <h2>Output</h2>
+    <label>Name <input id="name" maxlength="100"> <span class="dim">shown as "<span id="host">THIS-PC</span> (name)"</span></label>
+    <label>Quality <input id="quality" type="range" min="50" max="100"> <span id="quality-v" class="dim"></span></label>
+    <label>Encoding
+      <select id="encoding">
+        <option value="machine">The machine's setting in the IDN Node (default)</option>
+        <option value="auto">GPU for 4K to IDN receivers, CPU (SpeedHQ) otherwise</option>
+        <option value="offer">CPU (SpeedHQ); GPU only for IDN receivers that ask</option>
+        <option value="cpu">CPU (SpeedHQ) only</option>
+        <option value="force">GPU for every IDN receiver that can decode it</option>
+      </select>
+    </label>
+    <label>Video threads <input id="video_threads" type="number" min="0" max="64" class="w70"> <span class="dim">0: the machine's setting</span></label>
+    <p class="dim">NDI receivers get SpeedHQ, or NDI|HX when the IDN Node's "Sending to NDI receivers" says so. The preview's output uses these settings too.</p>
+  </section>
+
+  <section class="card">
+    <h2>Network and encryption</h2>
+    <label><input id="use_node" type="checkbox"> Use the IDN Node (this machine's site identity)</label>
+    <div id="manual">
+      <p class="dim">Used when the Node is off or not running:</p>
+      <label>Site passphrase <input id="passphrase" type="password" autocomplete="new-password"> <span id="pass-set" class="dim"></span> <button id="pass-remove" class="quiet" hidden>Remove</button></label>
+      <label>Discovery Server <input id="server" placeholder="host[:port]"></label>
+      <label>Site trust directory <input id="trust_dir"></label>
+    </div>
+  </section>
+
+  <div class="row"><button id="apply">Apply</button> <span id="saved" class="dim"></span></div>
+  <p class="dim small">This page runs inside OBS on this computer. To keep it in OBS: Docks → Custom Browser Docks, with the address <span id="url"></span>.</p>
+</main>
+<script src="/ui/ui.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

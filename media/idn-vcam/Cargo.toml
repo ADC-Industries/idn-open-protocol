@@ -1,0 +1,12 @@
+[package]
+name = "idn-vcam"
+description = "IDN Camera on Windows 11: the shared memory idn-display feeds the virtual camera's media source (idn-camera-source) through, and its class id (spec/extensions/idn-display.md §D.5)"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-open-protocol = { path = "../../core/idn-open-protocol" }

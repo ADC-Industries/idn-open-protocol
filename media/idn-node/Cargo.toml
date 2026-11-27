@@ -1,0 +1,51 @@
+[package]
+name = "idn-node"
+description = "IDN Node: the per-machine service that holds a machine's IDN site identity, with a local control panel"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+idn-aoip-device = { path = "../../core/idn-aoip-device" }
+# Ctrl+Alt+Del for remote control (R.25): SendSAS, from the service.
+idn-input = { path = "../../core/idn-input" }
+# http-client: updates fetched from the Site Manager (§N.23).
+idn-open-protocol = { path = "../../core/idn-open-protocol", features = ["http-client"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "io-util", "macros", "time", "sync", "signal"] }
+serde = { version = "1", features = ["derive"] }
+schemars = "1"
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Pipes",
+    # The service and its helpers (the session agent's start after an update, power).
+    "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Threading",
+    "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_System_Com",
+    "Win32_System_Registry", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_Environment",
+    # The bundled drivers (drivers.rs): their root devices, SetupAPI.
+    "Win32_Devices_DeviceAndDriverInstallation",
+] }
+
+[build-dependencies]
+embed-resource = "3"
+
+[dev-dependencies]
+# The push channel's test (a WebSocket client; tests/host.rs).
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+# The switcher's routed sound needs a Node (tests/routing.rs); without FFmpeg.
+idn-switcher = { path = "../idn-switcher", default-features = false }
+idn-mixer = { path = "../idn-mixer" }
+# The audio plugins' engine (IDN Send / Return) (tests/routing.rs).
+idn-audio-plugins = { path = "../idn-audio-plugins" }
+idn-asio = { path = "../idn-asio" }
+idn-site-manager = { path = "../idn-site-manager" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

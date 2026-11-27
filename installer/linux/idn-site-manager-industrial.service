@@ -1,0 +1,28 @@
+# IDN Site Manager | Industrial as a systemd service (spec/extensions/idn-industrial.md I.12):
+# the idn-site-manager-industrial package installs it; its settings are in
+# /etc/idn-site-manager-industrial.env, its data in /var/lib/idn-site-manager-industrial.
+[Unit]
+Description=IDN Site Manager | Industrial
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=IDN_DATA=/var/lib/idn-site-manager-industrial
+EnvironmentFile=-/etc/idn-site-manager-industrial.env
+ExecStart=/usr/bin/idn-site-manager-industrial
+Restart=always
+RestartSec=5
+# Its own user (made by systemd), its data folder its own.
+DynamicUser=yes
+StateDirectory=idn-site-manager-industrial
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# The broker's and web UI's ports are above 1024; nothing else is needed.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

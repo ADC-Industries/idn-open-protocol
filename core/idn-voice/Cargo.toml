@@ -1,0 +1,33 @@
+[package]
+name = "idn-voice"
+description = "IDN Voice: voice channels, calls, messages and recordings for both Site Managers (spec/extensions/idn-voice.md)"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+publish = false
+
+[dependencies]
+idn-common = { path = "../idn-common" }
+idn-open-protocol = { path = "../idn-open-protocol" }
+axum = { version = "0.8", default-features = false, features = ["ws", "tokio", "http1", "json", "query"] }
+bytes = "1"
+data-encoding = "2"
+redb = "4"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+qrcodegen = "=1.8.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+str0m = { version = "=0.24.1", default-features = false, features = ["rust-crypto"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
+# HTTPS of its own (IDN Site Manager, Media: Voice::serve_tls).
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+# Voice over IDN's link (§V.14): the QUIC connections its listener hands over.
+quinn = { version = "0.11", default-features = false, features = ["rustls", "ring", "runtime-tokio"] }
+
+[dev-dependencies]
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake", "connect"] }

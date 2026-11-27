@@ -1,0 +1,46 @@
+[package]
+name = "idn-iem"
+description = "IDN in-ear monitoring (spec/extensions/idn-iem.md): the desk's IEM flow wire format and its Opus coding, shared by the desk and the phone mixing library"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[features]
+default = ["receiver"]
+# The phone mixing library (`receiver`, idn-iem.md §I.8) and its C ABI (`ffi`): what
+# an Android or iOS app embeds. Pure Rust beside libopus (rustls with ring for the
+# desk's HTTPS port, tungstenite for its push channel).
+receiver = ["dep:serde_json", "dep:rustls", "dep:ring", "dep:tungstenite", "dep:socket2"]
+# Playing a mix (and capturing talkback) through the system's sound card with cpal:
+# Linux, Windows, macOS (Android and iOS apps use their own audio output and
+# `Receiver::render`).
+play = ["receiver", "dep:cpal"]
+
+[dependencies]
+# libopus 1.6 built from its bundled source with CMake (BSD-3-Clause): no system library,
+# and the same build for Android (its NDK's CMake toolchain) and iOS, for the phone
+# mixing library. Pinned: the coding is part of the wire format.
+opusic-c = { version = "=1.6.1", default-features = false, features = ["bundled"] }
+serde_json = { version = "1", optional = true }
+# TLS to the desk's network port, its certificate (or the site CA) pinned.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+ring = { version = "0.17", optional = true }
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"], optional = true }
+# Joining the multicast group with the port shared (SO_REUSEADDR).
+socket2 = { version = "0.6.5", optional = true }
+cpal = { version = "0.18", optional = true }
+
+# The static musl builds compile C with the system GCC and glibc's headers (.cargo/
+# config.toml): without _FORTIFY_SOURCE, whose checked calls musl lacks.
+[target.'cfg(target_env = "musl")'.dependencies]
+opusic-c = { version = "=1.6.1", default-features = false, features = ["bundled", "no-fortify-source"] }
+
+[dev-dependencies]
+idn-common = { path = "../../core/idn-common" }
+# The end-to-end tests: a desk in the test (its IEM flow, mixes, push channel, tokens).
+idn-mixer = { path = "../idn-mixer" }
+idn-open-protocol = { path = "../../core/idn-open-protocol" }
+libc = "0.2.191"

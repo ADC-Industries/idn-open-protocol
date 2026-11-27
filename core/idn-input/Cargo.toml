@@ -1,0 +1,28 @@
+[package]
+name = "idn-input"
+version = "0.3.8"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Keyboard and mouse injected on this machine: IDN Industrial's remote support and IDN remote control (R.25)"
+publish = false
+
+[dependencies]
+idn-common = { path = "../idn-common" }
+idn-open-protocol = { path = "../idn-open-protocol" }
+serde = { version = "1", features = ["derive"] }
+
+# A uinput virtual device, through raw ioctls (works on X and on Wayland, no display
+# libraries).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+# SendInput, the clipboard, and SendSAS loaded from sas.dll at run time.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_DataExchange",
+    "Win32_System_Memory", "Win32_System_Ole", "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi",
+] }
+
+[dev-dependencies]
+serde_json = "1"

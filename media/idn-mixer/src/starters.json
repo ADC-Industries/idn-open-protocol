@@ -1,0 +1,627 @@
+[
+ {
+  "name": "Spoken service",
+  "about": "Pastor, lectern and two handhelds (high-pass, compressor, automix), playback and video in stereo; DCAs and mute groups Speech and Playback.",
+  "commands": [
+   [
+    "channel",
+    {
+     "n": 1,
+     "name": "Pastor",
+     "link": false,
+     "color": "#3d74e0",
+     "automix": true,
+     "dca": [
+      true,
+      null,
+      null,
+      null
+     ],
+     "mute_groups": [
+      true,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -24,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 2,
+     "name": "Lectern",
+     "color": "#3d74e0",
+     "automix": true,
+     "dca": [
+      true,
+      null,
+      null,
+      null
+     ],
+     "mute_groups": [
+      true,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -24,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 3,
+     "name": "Handheld 1",
+     "link": false,
+     "color": "#3d74e0",
+     "automix": true,
+     "dca": [
+      true,
+      null,
+      null,
+      null
+     ],
+     "mute_groups": [
+      true,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -24,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 4,
+     "name": "Handheld 2",
+     "color": "#3d74e0",
+     "automix": true,
+     "dca": [
+      true,
+      null,
+      null,
+      null
+     ],
+     "mute_groups": [
+      true,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -24,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 5,
+     "name": "Playback L",
+     "color": "#3dbf6b",
+     "link": true,
+     "dca": [
+      null,
+      true,
+      null,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 6,
+     "name": "Playback R",
+     "color": "#3dbf6b",
+     "dca": [
+      null,
+      true,
+      null,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 7,
+     "name": "Video L",
+     "color": "#3dbfbf",
+     "link": true,
+     "dca": [
+      null,
+      true,
+      null,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 8,
+     "name": "Video R",
+     "color": "#3dbfbf",
+     "dca": [
+      null,
+      true,
+      null,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true
+     ]
+    }
+   ],
+   [
+    "dca",
+    {
+     "dca": 1,
+     "name": "Speech"
+    }
+   ],
+   [
+    "dca",
+    {
+     "dca": 2,
+     "name": "Playback"
+    }
+   ],
+   [
+    "mute_group",
+    {
+     "group": 1,
+     "name": "Speech"
+    }
+   ],
+   [
+    "mute_group",
+    {
+     "group": 2,
+     "name": "Playback"
+    }
+   ],
+   [
+    "desk",
+    {
+     "automix": true
+    }
+   ]
+  ]
+ },
+ {
+  "name": "Worship band",
+  "about": "Pastor and lectern, four vocals, acoustic, electric, bass, playback, keys (a stereo pair) and drums (stereo overheads), with high-pass filters and compressors; DCAs Speech, Vocals, Band, Drums; mute groups Speech, Band, Playback.",
+  "commands": [
+   [
+    "channel",
+    {
+     "n": 1,
+     "name": "Pastor",
+     "link": false,
+     "color": "#3d74e0",
+     "dca": [
+      true,
+      null,
+      null,
+      null
+     ],
+     "mute_groups": [
+      true,
+      null,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -24,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 2,
+     "name": "Lectern",
+     "color": "#3d74e0",
+     "dca": [
+      true,
+      null,
+      null,
+      null
+     ],
+     "mute_groups": [
+      true,
+      null,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -24,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 3,
+     "name": "Vocal 1",
+     "link": false,
+     "color": "#c43dd6",
+     "dca": [
+      null,
+      true,
+      null,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -20,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 4,
+     "name": "Vocal 2",
+     "color": "#c43dd6",
+     "dca": [
+      null,
+      true,
+      null,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -20,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 5,
+     "name": "Vocal 3",
+     "link": false,
+     "color": "#c43dd6",
+     "dca": [
+      null,
+      true,
+      null,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -20,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 6,
+     "name": "Vocal 4",
+     "color": "#c43dd6",
+     "dca": [
+      null,
+      true,
+      null,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ],
+     "hpf": 100,
+     "comp": {
+      "on": true,
+      "threshold": -20,
+      "ratio": 3
+     }
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 7,
+     "name": "Acoustic",
+     "link": false,
+     "color": "#e0913d",
+     "hpf": 80,
+     "dca": [
+      null,
+      null,
+      true,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 8,
+     "name": "Electric",
+     "color": "#e0913d",
+     "hpf": 80,
+     "dca": [
+      null,
+      null,
+      true,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 9,
+     "name": "Bass",
+     "link": false,
+     "color": "#e0913d",
+     "hpf": 30,
+     "comp": {
+      "on": true,
+      "threshold": -18,
+      "ratio": 4
+     },
+     "dca": [
+      null,
+      null,
+      true,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 10,
+     "name": "Playback",
+     "color": "#3dbf6b",
+     "mute_groups": [
+      null,
+      null,
+      true
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 11,
+     "name": "Keys L",
+     "color": "#e0913d",
+     "link": true,
+     "dca": [
+      null,
+      null,
+      true,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 12,
+     "name": "Keys R",
+     "color": "#e0913d",
+     "dca": [
+      null,
+      null,
+      true,
+      null
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 13,
+     "name": "Kick",
+     "link": false,
+     "color": "#d6403d",
+     "hpf": 30,
+     "dca": [
+      null,
+      null,
+      null,
+      true
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 14,
+     "name": "Snare",
+     "color": "#d6403d",
+     "hpf": 80,
+     "dca": [
+      null,
+      null,
+      null,
+      true
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 15,
+     "name": "Overhead L",
+     "color": "#d6403d",
+     "hpf": 150,
+     "link": true,
+     "dca": [
+      null,
+      null,
+      null,
+      true
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ]
+    }
+   ],
+   [
+    "channel",
+    {
+     "n": 16,
+     "name": "Overhead R",
+     "color": "#d6403d",
+     "hpf": 150,
+     "dca": [
+      null,
+      null,
+      null,
+      true
+     ],
+     "mute_groups": [
+      null,
+      true,
+      null
+     ]
+    }
+   ],
+   [
+    "dca",
+    {
+     "dca": 1,
+     "name": "Speech"
+    }
+   ],
+   [
+    "dca",
+    {
+     "dca": 2,
+     "name": "Vocals"
+    }
+   ],
+   [
+    "dca",
+    {
+     "dca": 3,
+     "name": "Band"
+    }
+   ],
+   [
+    "dca",
+    {
+     "dca": 4,
+     "name": "Drums"
+    }
+   ],
+   [
+    "mute_group",
+    {
+     "group": 1,
+     "name": "Speech"
+    }
+   ],
+   [
+    "mute_group",
+    {
+     "group": 2,
+     "name": "Band"
+    }
+   ],
+   [
+    "mute_group",
+    {
+     "group": 3,
+     "name": "Playback"
+    }
+   ]
+  ]
+ }
+]

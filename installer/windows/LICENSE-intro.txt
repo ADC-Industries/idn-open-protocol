@@ -1,0 +1,45 @@
+IDN Open Protocol for Windows
+Copyright ADC Industries
+
+The IDN programs (the IDN Node, idn-session, the command-line tools and idn-audio) are
+licensed under the MIT License or the Apache License 2.0, at your option. Both texts follow.
+
+The IDN plugin for OBS Studio (idn_obs.dll, its loader, and idn_obs_ffmpeg7.dll and
+idn_obs_ffmpeg8.dll, its builds for OBS Studio 32 and 33) is part of OBS Studio's plugin system and is
+distributed under the GNU General Public License, version 2 or later. It does not contain
+idn-audio or ASIO.
+
+ASIO is a trademark of Steinberg Media Technologies GmbH. IDN's ASIO support (idn-audio's
+ASIO sound cards and the IDN ASIO driver, idn_asio.dll) is IDN's own, written from the
+interface definitions of cwASIO (github.com/s13n/cwASIO), Copyright (c) 2024 Stefan
+Heinzmann, under the MIT License (its text follows); it contains nothing of Steinberg's
+SDK. Your sound card's own ASIO driver does the rest.
+
+FFmpeg, if you choose it, is downloaded during installation from
+github.com/BtbN/FFmpeg-Builds (an LGPL build, licence version 2.1 or later; its licence text
+is installed as FFmpeg-LICENSE.txt). It is not part of IDN; idn-codec uses it.
+
+The IDN Node's window shows its control panel with the Microsoft Edge WebView2 Runtime,
+part of Windows 10 and 11. WebView2Loader.dll is Microsoft's, from the WebView2 SDK, and
+is redistributed under that SDK's licence. Without the runtime the panel opens in the
+browser.
+
+The site clock in every IDN program is IDN's modified copy of statime 0.4.0, Copyright (c)
+2022-2023 Tweede Golf and Contributors, under the MIT License or the Apache License 2.0
+(their texts follow).
+
+Open Media Transport: the idn command's OMT bridge is written after libomtnet and contains
+the VMX codec (libvmx), both Copyright (c) 2025 Open Media Transport Contributors, under
+the MIT License (its text follows the Apache License below).
+
+Live captions: the idn command contains whisper.cpp and ggml (Copyright (c) 2023-2024 The
+ggml authors, MIT License) through whisper-rs (the Unlicense). Its speech models are
+downloaded when captions are first used, from whisper.cpp's models on Hugging Face (OpenAI
+Whisper's weights, MIT License). On the GPU it uses Vulkan through the Khronos Vulkan
+headers (Copyright 2015-2026 The Khronos Group Inc., Apache License 2.0 or MIT License) and
+the GPU driver's own Vulkan loader; nothing of Vulkan is installed.
+
+NDI is a registered trademark of Vizrt NDI AB. Dante is a registered trademark of Audinate
+Pty Ltd. Other names are trademarks of their respective owners. IDN is an independent,
+NDI-Compatible implementation and is not affiliated with or endorsed by them;
+"NDI-Compatible" means that IDN interoperates with NDI devices and software.

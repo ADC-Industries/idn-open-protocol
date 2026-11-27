@@ -1,0 +1,14 @@
+/* IDN Output settings page (idn-obs): what is its own (the shared rules are /ui/base.css). */
+body { line-height: 1.45; }
+main { padding: 12px; max-width: 720px; }
+.on { color: var(--ok); }
+.warn { color: var(--warn); }
+section.card { margin: 0 0 12px; }
+label { gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+input[type=range] { flex: 1; min-width: 160px; }
+#name, #server, #trust_dir, #passphrase { flex: 1; min-width: 180px; }
+button { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; padding: 6px 14px; border-radius: 5px; }
+button.quiet { background: var(--raised); border-color: var(--line); color: var(--ink); padding: 3px 9px; }
+.bigcheck { font-size: 15px; font-weight: 600; flex-wrap: nowrap; }
+.bigcheck input { width: 18px; height: 18px; }
+.row { gap: 10px; flex-wrap: nowrap; }

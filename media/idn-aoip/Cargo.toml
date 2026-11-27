@@ -1,0 +1,21 @@
+[package]
+name = "idn-aoip"
+description = "An IDN endpoint on networks of Dante-compatible equipment (core/idn-aoip-device; unofficial: not made, authorised or supported by Audinate)"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[[bin]]
+name = "idn-aoip"
+path = "src/main.rs"
+
+[dependencies]
+idn-aoip-device = { path = "../../core/idn-aoip-device" }
+idn-common = { path = "../../core/idn-common" }
+idn-open-protocol = { path = "../../core/idn-open-protocol" }
+libc = "0.2"
+serde_json = "1"
+socket2 = { version = "0.6.5", features = ["all"] }

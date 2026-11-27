@@ -1,0 +1,80 @@
+[package]
+name = "idn-industrial"
+description = "IDN Industrial: IDN Site Manager | Industrial and the Node | Industrial's link to it (spec/extensions/idn-industrial.md)"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+publish = false
+
+[features]
+# Real screen capture for remote support (§I.11): pulls idn-ffmpeg, which links the
+# system's FFmpeg. Off by default so the Site Manager and an FFmpeg-less Node build
+# without it; the Windows Node build turns it on. Without it a synthetic backend keeps
+# the protocol and relay working for tests.
+capture = ["dep:idn-ffmpeg"]
+# The SQL module's ODBC (§I.10.6) off Windows: links unixODBC (libodbc). Windows always has
+# it (odbc32). Without it the module runs but says the build has no ODBC.
+odbc = ["dep:odbc-api"]
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+idn-input = { path = "../../core/idn-input" }
+idn-mqtt = { path = "../../core/idn-mqtt" }
+idn-voice = { path = "../../core/idn-voice" }
+idn-open-protocol = { path = "../../core/idn-open-protocol", features = ["http-client"] }
+idn-ffmpeg = { path = "../../core/idn-ffmpeg", optional = true }
+quinn = { version = "0.11", default-features = false, features = ["rustls", "ring", "runtime-tokio"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util", "fs", "signal"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake", "connect"] }
+webpki-roots = "1"
+yamux = "0.13"
+futures = "0.3"
+tokio-util = { version = "0.7", features = ["compat", "io"] }
+bytes = "1"
+axum = { version = "0.8", default-features = false, features = ["ws", "tokio", "http1", "json", "query"] }
+redb = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ring = "0.17"
+data-encoding = "2"
+rumqttc = { version = "0.25", default-features = false }
+sysinfo = { version = "0.40", default-features = false, features = ["system", "disk", "component"] }
+toml = "0.8"
+regex = "1"
+tokio-modbus = { version = "0.17", default-features = false, features = ["tcp"] }
+odbc-api = { version = "30", optional = true, default-features = false, features = ["odbc_version_3_80"] }
+
+# Input injection on Linux for remote support (§I.11.4): a uinput virtual device, through
+# raw ioctls (works on X and on Wayland, no display libraries).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+odbc-api = { version = "30", default-features = false, features = ["odbc_version_3_80"] }
+# Input injection for remote support (§I.11.4): SendInput, clipboard, and SendSAS loaded
+# from sas.dll at run time. Plus the session helper (§I.11.2, src/session.rs): launching
+# a process on the interactive/secure desktop from the service, and following it.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_DataExchange",
+    "Win32_System_Memory", "Win32_System_Ole", "Win32_System_LibraryLoader",
+    "Win32_Security", "Win32_System_Threading", "Win32_System_RemoteDesktop",
+    "Win32_System_Diagnostics_ToolHelp", "Win32_System_StationsAndDesktops",
+    # The chat popup window (§I.11.5).
+    "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi",
+    # The SQL module's workers as another account (§I.10.6): LogonUser, the user's
+    # environment, a pipe list for the child.
+    "Win32_System_Environment", "Win32_System_Pipes",
+] }
+
+[dev-dependencies]
+bytes = "1"
+rumqttc = { version = "0.25", default-features = false }
+sysinfo = { version = "0.40", default-features = false, features = ["system", "disk", "component"] }
+serde_json = "1"
+
+[build-dependencies]
+embed-resource = "3"

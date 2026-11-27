@@ -1,0 +1,50 @@
+[package]
+name = "idn-voice-client"
+description = "IDN Voice's client library for handset apps (such as a fleet app on Android for the Inrico B01): the link over QUIC with WebSocket fallback, resume, Opus, the jitter buffer; a Rust API and a C ABI"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+# A Rust library here; the C library (Android's .so, a .a) is chosen at build time with
+# `cargo rustc --crate-type cdylib|staticlib` (README), as idn-iem's, so the workspace's
+# own builds link no shared or static library they don't use.
+
+# Nothing of IDN's own (as idn-iem's phone library): every dependency builds for
+# aarch64-linux-android with the NDK, and none is desktop-only.
+[dependencies]
+# libopus 1.6 from its bundled source with CMake (BSD-3-Clause): the NDK's CMake toolchain
+# builds it for Android. Pinned as idn-iem pins it.
+opusic-c = { version = "=1.6.1", default-features = false, features = ["bundled"] }
+# QUIC (IDN's link, ALPN idn-voice/1) as idn-open-protocol uses it.
+quinn = { version = "0.11", default-features = false, features = ["rustls", "ring", "runtime-tokio"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+# A throwaway Ed25519 certificate for the link's TLS, should a listener ask for one.
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
+ring = "0.17"
+# Public authorities, for a server behind a tunnel with no pinned certificate.
+webpki-roots = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde_json = "1"
+
+# The static musl builds compile C with the system GCC and glibc's headers (.cargo/
+# config.toml): without _FORTIFY_SOURCE, whose checked calls musl lacks.
+[target.'cfg(target_env = "musl")'.dependencies]
+opusic-c = { version = "=1.6.1", default-features = false, features = ["bundled", "no-fortify-source"] }
+
+[dev-dependencies]
+# The real server in the tests, in-process.
+idn-voice = { path = "../idn-voice" }
+idn-common = { path = "../idn-common" }
+# The link listener's key in the QUIC server tests (built for idn-voice anyway).
+idn-open-protocol = { path = "../idn-open-protocol" }
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }
+
+[features]
+# Tests against Voice's own QUIC listener (idn-voice/1 on the link, built beside this
+# crate on 2026-11-26): on once both compile together (tests/all/quic_server.rs).
+quic-server-tests = []

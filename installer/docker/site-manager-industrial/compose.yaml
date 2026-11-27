@@ -1,0 +1,26 @@
+# IDN Site Manager | Industrial beside a company's application server (Komodo stack or
+# docker compose). One per company. Back up the volume: it holds the site CA.
+#
+# Machines reach it through a Cloudflare Tunnel pointed at http://idn-site-manager:8080
+# (the WebSocket link at /idn/link), and over QUIC where UDP 29206 is forwarded to this
+# host. The application server reaches its MQTT broker at idn-site-manager:1883 on the
+# compose network (no port published), or at wss://<host>/mqtt through the tunnel.
+services:
+  idn-site-manager:
+    image: idn-site-manager-industrial:latest   # docker build -f installer/docker/site-manager-industrial/Dockerfile -t idn-site-manager-industrial .
+    restart: unless-stopped
+    volumes:
+      - idn-data:/data
+    ports:
+      - "29206:29206/udp"      # QUIC (optional: only if forwarded from the internet)
+      - "29207:29207/udp"      # Voice's calls (else they go over the WebSocket)
+      - "29203:29203"          # Voice over HTTPS for handsets on the plant network
+      - "29203:29203/udp"      # ... and over IDN's link (QUIC: handsets changing networks)
+      # - "8080:8080"        # the web UI on the LAN without the tunnel
+    environment:
+      # What enrolment tokens tell machines (the tunnel's hostname; QUIC if forwarded):
+      IDN_PUBLIC_URLS: "wss://idn.example.com/idn/link,idn://idn.example.com:29206"
+      # IDN_API_KEY: set it, or read the generated one from /data/api.key
+      # IDN_ADMIN_PASSWORD: set once, or set it on the first visit with the API key
+volumes:
+  idn-data:

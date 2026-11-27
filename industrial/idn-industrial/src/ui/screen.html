@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remote screen — IDN Site Manager | Industrial</title>
+<style>
+:root{--bg:#131615;--fg:#e7eae8;--muted:#9aa49f;--line:#2e3432;--accent:#ef8a4a;--bad:#ff8a80}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;color:var(--fg);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+#bar{display:flex;align-items:center;gap:12px;padding:6px 12px;background:#15110c;border-bottom:1px solid var(--line)}
+#bar b{color:var(--accent)}
+#bar .muted{color:var(--muted)}
+#bar button{background:none;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer}
+#bar button.on{background:var(--accent);color:#1a0e06;border-color:var(--accent)}
+#wrap{position:absolute;inset:38px 0 0 0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+canvas{max-width:100%;max-height:100%;background:#000;cursor:default}
+canvas.control{cursor:none}
+#msg{position:absolute;top:50%;left:0;right:0;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="bar">
+<b>Remote screen</b>
+<span class="muted" id="info">connecting…</span>
+<span style="flex:1"></span>
+<button id="ctl" hidden>Take control</button>
+<button id="cad" hidden title="Ctrl+Alt+Del">Ctrl+Alt+Del</button>
+<span class="muted" id="stat"></span>
+</div>
+<div id="wrap"><canvas id="cv" width="1280" height="720"></canvas></div>
+<div id="msg"></div>
+<script>
+const qs=new URLSearchParams(location.search);
+const session=qs.get('session');
+const wantControl=qs.get('control')==='1';
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const info=document.getElementById('info'),stat=document.getElementById('stat'),msg=document.getElementById('msg');
+const ctlBtn=document.getElementById('ctl'),cadBtn=document.getElementById('cad');
+let ws,decoder,configured=false,controlling=false,frames=0;
+
+if(!('VideoDecoder' in window)){msg.textContent='This browser has no WebCodecs; use a recent Chrome or Edge.';}
+else start();
+
+// Build the avc1 codec string from an SPS NAL (profile_idc, constraints, level_idc).
+function codecFromAnnexB(buf){
+  const b=new Uint8Array(buf);
+  for(let i=0;i+4<b.length&&i<256;i++){
+    if(b[i]===0&&b[i+1]===0&&b[i+2]===1&&(b[i+3]&0x1f)===7){
+      const p=b[i+4],c=b[i+5],l=b[i+6];
+      return 'avc1.'+[p,c,l].map(x=>x.toString(16).padStart(2,'0')).join('');
+    }
+  }
+  return 'avc1.640028';
+}
+
+function ensureDecoder(firstChunk){
+  if(configured)return;
+  const codec=codecFromAnnexB(firstChunk);
+  decoder=new VideoDecoder({
+    output:f=>{
+      if(cv.width!==f.displayWidth){cv.width=f.displayWidth;cv.height=f.displayHeight;}
+      ctx.drawImage(f,0,0,cv.width,cv.height);
+      f.close();
+      frames++;
+    },
+    // A decoder error closes it: made again with the next keyframe (the screen froze on
+    // its last picture; bug round E, E6-8).
+    error:e=>{stat.textContent='decoder: '+e.message;configured=false;decoder=null;}
+  });
+  try{decoder.configure({codec,optimizeForLatency:true});configured=true;info.textContent=cv.width+'×'+cv.height;}
+  catch(e){stat.textContent='configure '+codec+': '+e.message;}
+}
+
+function onFrame(buf){
+  // [u8 keyframe][i64 pts ms LE][H.264 Annex B]
+  const dv=new DataView(buf);
+  const key=dv.getUint8(0)!==0;
+  const pts=Number(dv.getBigInt64(1,true));
+  const data=new Uint8Array(buf,9);
+  if(!configured){ if(!key)return; ensureDecoder(data); }
+  if(!configured)return;
+  try{
+    decoder.decode(new EncodedVideoChunk({type:key?'key':'delta',timestamp:pts*1000,data}));
+  }catch(e){ stat.textContent='decode: '+e.message; configured=false; decoder=null; }
+}
+
+function start(){
+  const proto=location.protocol==='https:'?'wss:':'ws:';
+  ws=new WebSocket(proto+'//'+location.host+'/api/screen/'+encodeURIComponent(session)+'/ws');
+  ws.binaryType='arraybuffer';
+  ws.onopen=()=>{info.textContent='connected';};
+  ws.onmessage=ev=>{
+    if(typeof ev.data==='string'){ // a clipboard answer
+      try{const j=JSON.parse(ev.data);if(j.clipboard!=null)navigator.clipboard?.writeText(j.clipboard);}catch(e){}
+      return;
+    }
+    onFrame(ev.data);
+  };
+  ws.onclose=()=>{msg.textContent='The session ended.';stat.textContent='';};
+  ws.onerror=()=>{stat.textContent='connection error';};
+  setInterval(()=>{stat.textContent=frames+' frames';frames=frames;},2000);
+  if(wantControl){ctlBtn.hidden=false;cadBtn.hidden=false;}
+}
+
+// ---- input (operators) ----
+function send(obj){ if(controlling&&ws&&ws.readyState===1) ws.send(JSON.stringify({events:[obj]})); }
+function pos(e){
+  const r=cv.getBoundingClientRect();
+  const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+  const y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
+  return {x:Math.round(x*65535),y:Math.round(y*65535)};
+}
+const BTN=['left','middle','right'];
+cv.addEventListener('mousemove',e=>{const p=pos(e);send({t:'move',x:p.x,y:p.y});});
+cv.addEventListener('mousedown',e=>{const p=pos(e);send({t:'move',x:p.x,y:p.y});send({t:'button',button:BTN[e.button]||'left',down:true});e.preventDefault();});
+cv.addEventListener('mouseup',e=>{send({t:'button',button:BTN[e.button]||'left',down:false});e.preventDefault();});
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('wheel',e=>{send({t:'wheel',dx:Math.sign(e.deltaX),dy:-Math.sign(e.deltaY)});e.preventDefault();},{passive:false});
+function key(e,down){ if(!controlling)return; send({t:'key',code:e.code,down}); e.preventDefault(); }
+window.addEventListener('keydown',e=>key(e,true));
+window.addEventListener('keyup',e=>key(e,false));
+
+ctlBtn.onclick=()=>{
+  controlling=!controlling;
+  ctlBtn.classList.toggle('on',controlling);
+  ctlBtn.textContent=controlling?'Controlling':'Take control';
+  cv.classList.toggle('control',controlling);
+  if(controlling)cv.focus();
+};
+cadBtn.onclick=()=>{ if(ws&&ws.readyState===1) ws.send(JSON.stringify({events:[{t:'cad'}]})); };
+cv.tabIndex=0;
+</script>
+</body>
+</html>

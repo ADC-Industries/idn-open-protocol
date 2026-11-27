@@ -1,0 +1,54 @@
+[package]
+name = "idn-audio"
+description = "Sound-card input and output for the IDN Open Protocol: a sound card as a source, a source on a sound card, with clock-drift correction"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-open-protocol = { path = "../../core/idn-open-protocol" }
+# Sound cards: WASAPI on Windows, CoreAudio on macOS, ALSA on Linux (JACK and ASIO
+# behind features).
+cpal = "0.18"
+# AES67's sockets: multicast on a chosen interface, shared ports, DSCP (the version the
+# core library already uses).
+socket2 = { version = "0.6.5", features = ["all"] }
+idn-dsp = { path = "../../core/idn-dsp" }
+# Real-time priority for the audio threads (Windows' low-latency mode).
+idn-common = { path = "../../core/idn-common" }
+# ASIO's interface (IDN's own, from cwASIO's MIT headers; no Steinberg SDK).
+idn-asio-abi = { path = "../../core/idn-asio-abi" }
+
+# One program's sound on Linux: PipeWire's graph as `pw-dump` prints it.
+[target.'cfg(target_os = "linux")'.dependencies]
+serde_json = "1"
+
+# One program's sound (WASAPI process loopback), which cpal doesn't offer. The version cpal
+# and wgpu already bring.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation", "Win32_Media_Audio", "Win32_Security", "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    # The ASIO host's thread pumps window messages (drivers that post to it).
+    "Win32_UI_WindowsAndMessaging",
+] }
+# Its `implement` macro (the activation's completion handler) names windows-core.
+windows-core = "0.62"
+# Windows' low-latency shared mode (IAudioClient3), which cpal doesn't offer. MIT; on the
+# same windows version.
+wasapi = "0.27"
+
+[features]
+# ASIO sound cards on Windows and Linux (`IDN_AUDIO_HOST=asio`), on by default: IDN's own
+# host (src/asio_host/, a cpal custom host on idn-asio-abi, written from cwASIO's MIT
+# headers). Linux finds drivers as cwASIO does
+# (/etc/cwASIO). No Steinberg SDK at build or run time. On other targets
+# the feature compiles nothing.
+default = ["asio"]
+asio = ["cpal/custom"]
+# JACK on Linux (needs libjack's development files).
+jack = ["cpal/jack"]

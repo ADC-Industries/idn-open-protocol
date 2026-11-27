@@ -1,0 +1,22 @@
+[package]
+name = "idn-release"
+version = "0.3.8"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Makes and checks signed IDN releases (G10), with the key on a YubiKey"
+publish = false
+
+[dependencies]
+idn-open-protocol = { path = "../../core/idn-open-protocol" }
+idn-common = { path = "../../core/idn-common" }
+# The signing key on a YubiKey (its OpenPGP card, Ed25519): it never leaves the key.
+# openpgp-card (MIT OR Apache-2.0) over PC/SC (the system's: WinSCard on Windows, pcsclite
+# on Linux).
+openpgp-card = "=0.7.0"
+card-backend-pcsc = "=0.5.2"
+# The PINs as openpgp-card takes them.
+secrecy = "0.10"
+# The card's OpenPGP fingerprint (SHA-1, as OpenPGP defines it).
+ring = "0.17"
+# PINs typed without showing them (Apache-2.0).
+rpassword = "=7.5.4"

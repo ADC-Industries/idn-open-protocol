@@ -1,0 +1,30 @@
+// IDN Node | Industrial (spec/extensions/idn-industrial.md §I.10; bug round E, E7-11):
+// its service runs as the user idn-industrial, which may reboot the machine and restart
+// a service only when root's /etc/idn-industrial/actions.toml has an action for it
+// (`idn-industrial polkit-check` answers, reading only that file). Nothing else.
+polkit.addRule(function (action, subject) {
+    if (subject.user != "idn-industrial") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var check = function (args) {
+        try {
+            polkit.spawn(["/usr/bin/idn-industrial", "polkit-check"].concat(args));
+            return true;
+        } catch (e) {
+            return false;
+        }
+    };
+    // (Also past an inhibitor, e.g. an update in progress: root's reboot action means
+    // the reboot; bug round F, F3-8.)
+    if (action.id == "org.freedesktop.login1.reboot" ||
+        action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
+        action.id == "org.freedesktop.login1.reboot-ignore-inhibit") {
+        return check(["reboot"]) ? polkit.Result.YES : polkit.Result.NOT_HANDLED;
+    }
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("verb") == "restart") {
+        var unit = action.lookup("unit");
+        return unit && check(["restart", unit]) ? polkit.Result.YES : polkit.Result.NOT_HANDLED;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

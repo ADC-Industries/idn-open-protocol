@@ -1,0 +1,46 @@
+[package]
+name = "idn-plugin-host"
+description = "CLAP and VST3 plugins for the IDN mixing desk (R.16 stage 2), hosted in a helper process so that a crashing plugin silences only itself"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# CLAP hosting (MIT OR Apache-2.0; pinned, pre-1.0).
+clack-host = "=0.2.0"
+clack-extensions = { version = "=0.2.0", features = ["clack-host", "params", "state", "latency", "audio-ports", "gui", "timer", "posix-fd"] }
+# VST3 hosting: bindings generated from Steinberg's SDK (MIT since VST 3.8), MIT OR Apache-2.0.
+vst3 = "=0.3.0"
+libloading = "0.9"
+
+# Plugins' own windows (spec/extensions/idn-mixer.md §M.10): X11 on Linux (pure Rust), Win32
+# on Windows.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "=0.13.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+# The IDN audio plugins' test (tests/host.rs): their sound routed through a Node.
+idn-open-protocol = { path = "../../core/idn-open-protocol" }
+clack-plugin = "=0.2.0"
+clack-extensions = { version = "=0.2.0", features = ["clack-host", "clack-plugin", "params", "state", "latency", "audio-ports"] }
+
+# Screenshots and a mouse in the window test.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+x11rb = { version = "=0.13.1", features = ["xtest"] }
+
+# A small CLAP gain plugin for the tests (a library the host loads like any plugin).
+[[example]]
+name = "test_gain"
+crate-type = ["cdylib"]

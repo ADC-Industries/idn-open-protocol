@@ -1,0 +1,41 @@
+# IDN Node | Industrial as a systemd service (spec/extensions/idn-industrial.md I.8),
+# installed by the idn-industrial package. By hand:
+#   install -m 755 idn-industrial /usr/bin/        (the polkit rule runs /usr/bin/idn-industrial)
+#   install -m 644 idn-industrial.service /etc/systemd/system/
+#   install -m 644 50-idn-industrial.rules /etc/polkit-1/rules.d/
+#   useradd --system --home-dir /var/lib/idn-industrial --shell /usr/sbin/nologin idn-industrial
+#   install -d -m 755 /etc/idn-industrial          (actions.toml: root's, see below)
+#   systemctl enable --now idn-industrial
+#   idn-industrial enrol IDNI1-...      (as root, through the running service)
+[Unit]
+Description=IDN Node | Industrial
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/idn-industrial run --state /var/lib/idn-industrial
+Restart=always
+RestartSec=5
+# Its own user, not root (bug round E, E7-11). Its state folder is that
+# user's (systemd hands it over, files included). What runs as root is only what root
+# allows: its actions come from /etc/idn-industrial/actions.toml alone (root's; its own
+# settings files, editable from its local page, can't add actions), and the polkit rule
+# (50-idn-industrial.rules) lets this user reboot and restart the services that file
+# names, nothing else. A site's script that needs root uses sudo with a rule of its own.
+User=idn-industrial
+Group=idn-industrial
+# Serial Modbus devices.
+SupplementaryGroups=dialout
+Environment=IDN_INDUSTRIAL_ACTIONS=/etc/idn-industrial/actions.toml
+StateDirectory=idn-industrial
+StateDirectoryMode=0700
+# What it never needs taken away: control groups. Only that: for a service of its own
+# user, ProtectKernelModules/Tunables/Logs, RestrictSUIDSGID, LockPersonality and the
+# like each imply NoNewPrivileges, and a site's script that needs root uses sudo (§I.10),
+# which that stops (bug round F, F3-1). Its /tmp the machine's: a site's script may hand
+# files on there.
+ProtectControlGroups=yes
+NoNewPrivileges=no
+
+[Install]
+WantedBy=multi-user.target

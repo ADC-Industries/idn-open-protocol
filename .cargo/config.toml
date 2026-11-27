@@ -1,0 +1,19 @@
+# The static musl builds (for lab handoff) compile ring's C parts with the system GCC;
+# a separate musl-gcc toolchain is not needed for that.
+[env]
+CC_x86_64_unknown_linux_musl = "gcc"
+# glibc's headers turn memcpy and the like into _FORTIFY_SOURCE's checked calls, which
+# musl lacks (libopus, for idn-iem): off for the musl builds.
+CFLAGS_x86_64_unknown_linux_musl = "-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
+
+# Cross-building for Windows (MinGW-w64): the C/C++ compilers for the target and the
+# clang target for bindgen, used by idn-obs's libobs bindings and FFmpeg's. (ASIO needs
+# neither: it is IDN's own, core/idn-asio-abi.)
+CC_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-gcc"
+CXX_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-g++"
+# `-D__X86INTRIN_H`: clang's x86 intrinsics left out of what bindgen reads. FFmpeg
+# bindings 9 (ffmpeg-sys-next) bind libavutil's D3D11/D3D12 hwcontext headers, which reach
+# windows.h and through it the AMX tile type (`__tile1024i_str`, packed and 64-aligned:
+# Rust refuses it); no binding needs an intrinsic.
+BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu = "--target=x86_64-pc-windows-gnu -D__X86INTRIN_H"
+

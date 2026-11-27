@@ -1,0 +1,28 @@
+/* The IDN Node panel's own (the shared look is /ui/shell.css). */
+/* The Services page: each service its switch, and beneath it its start by itself. */
+.svc { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 14px 18px; border-top: 1px solid var(--line); align-items: center; }
+.svc:first-child { border-top: 0; }
+.svc .tt { font-weight: 650; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.svc .st { color: var(--muted); font-size: 13.5px; }
+.svc .ln { grid-column: 1 / -1; font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.svc .auto { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 13.5px; color: var(--muted); }
+.svc .auto .sw { transform: scale(.85); }
+.svc .go { grid-column: 1 / -1; justify-self: start; margin-left: -8px; }
+
+/* The first-run wizard (idn-node.md §N.22). */
+#wizard { max-width: 560px; width: 94vw; padding: 20px 22px; }
+#wizard h2 { margin: 6px 0 10px; font-size: 20px; }
+#wizard label { display: grid; gap: 4px; margin: 8px 0; }
+#wizard input:not([type=radio]):not([type=checkbox]) { padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--ink); font: inherit; }
+#wizard label.check, #wizard label.choice { display: flex; gap: 10px; align-items: flex-start; }
+#wizard .choice { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+#wizard .choice b { display: block; }
+#wizard .dim { color: var(--muted); }
+#wizard .code { font: 600 28px var(--mono); letter-spacing: 3px; margin: 10px 0; }
+#wizard .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+#wizard button { font: inherit; font-size: 14px; font-weight: 650; padding: 8px 14px; border-radius: 9px; border: 1px solid transparent; background: var(--acc); color: var(--onacc); cursor: pointer; }
+#wizard button.quiet { background: transparent; color: var(--acc); }
+.wz-steps { display: flex; gap: 6px; }
+.wz-steps span { width: 28px; height: 4px; border-radius: 2px; background: var(--line); }
+.wz-steps span.on { background: var(--acc); }
+

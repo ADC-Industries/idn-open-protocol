@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>IDN Voice</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1b1f24; --muted: #5d6670; --line: #d6dbe1; --accent: #1f6feb; --bad: #c62828; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15181c; --card: #1e2227; --text: #e6e9ed; --muted: #9aa3ad; --line: #343a42; --accent: #4c8dff; --bad: #ff6b6b; } }
+  [hidden] { display: none !important; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 460px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 16px 0; }
+  label { display: block; margin: 0 0 12px; }
+  label.check { display: flex; gap: 8px; align-items: center; }
+  input[type=text] { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  button { font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .key { font-weight: 600; min-width: 6em; }
+  .error { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>IDN Voice</h1>
+  <p class="muted">Talk on the site's channels from this computer.</p>
+  <p id="error" class="error" role="alert" hidden></p>
+  <form id="form" class="card">
+    <label>Voice server
+      <input type="text" name="server" required placeholder="site-manager or https://site-manager:29203/voice/" autocomplete="off" spellcheck="false">
+    </label>
+    <p class="muted">The IDN Site Manager's name or address (IDN Media), or the whole Voice link your administrator gave you (IDN Industrial: <code>http://server:8080/voice/</code>).</p>
+    <div id="key-part" hidden>
+      <div class="row" style="margin-bottom:12px">
+        <span>Talk key or foot pedal:</span>
+        <span id="key" class="key">none</span>
+        <button type="button" id="learn">Set…</button>
+        <button type="button" id="clear">None</button>
+      </div>
+      <p class="muted">Hold it to talk where you talked last (or your first channel), from any program.</p>
+      <label class="check"><input type="checkbox" name="pass_key"> The key still reaches the program in front</label>
+      <label class="check"><input type="checkbox" name="autostart"> Start when I log in (in the background, in the notification area)</label>
+    </div>
+    <div id="linux-part" hidden>
+      <label class="check"><input type="checkbox" name="autostart_linux"> Start when I log in (minimised)</label>
+    </div>
+    <div class="row">
+      <button type="submit" class="primary">Connect</button>
+      <button type="button" id="cancel" hidden>Cancel</button>
+    </div>
+  </form>
+</main>
+<script>
+  const STATE = {{STATE}};
+  function host(m) {
+    m.nonce = STATE.nonce;
+    const s = JSON.stringify(m);
+    if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(s);
+    else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.idnVoice) window.webkit.messageHandlers.idnVoice.postMessage(s);
+  }
+  const f = document.getElementById('form');
+  f.server.value = STATE.server || '';
+  f.pass_key.checked = !!STATE.pass_key;
+  f.autostart.checked = !!STATE.autostart;
+  f.autostart_linux.checked = !!STATE.autostart;
+  document.getElementById('key-part').hidden = !STATE.windows;
+  document.getElementById('linux-part').hidden = STATE.windows;
+  document.getElementById('cancel').hidden = !STATE.server;
+  const err = document.getElementById('error');
+  if (STATE.error) { err.textContent = STATE.error; err.hidden = false; }
+  window.setKey = (name) => {
+    document.getElementById('key').textContent = name || 'none';
+    document.getElementById('learn').textContent = 'Set…';
+  };
+  window.setKey(STATE.key_name);
+  document.getElementById('learn').onclick = (e) => {
+    e.target.textContent = 'Press the key or pedal… (Esc: cancel)';
+    host({ t: 'learn' });
+  };
+  document.getElementById('clear').onclick = () => { host({ t: 'clear_key' }); window.setKey(''); };
+  document.getElementById('cancel').onclick = () => host({ t: 'cancel' });
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    host({ t: 'save', server: f.server.value, pass_key: f.pass_key.checked,
+           autostart: STATE.windows ? f.autostart.checked : f.autostart_linux.checked });
+  };
+  f.server.focus();
+</script>
+</body>
+</html>

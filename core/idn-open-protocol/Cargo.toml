@@ -1,0 +1,74 @@
+[package]
+name = "idn-open-protocol"
+description = "IDN Open Protocol: an open implementation of an NDI-Compatible network video protocol"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+readme = "../../README.md"
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+# What every IDN program shares below this library (saving files, the state folder).
+idn-common = { path = "../idn-common" }
+argon2 = "0.6"
+# Windowed-sinc resampling for audio drift correction (audio::Mixer); the FFT resamplers
+# aren't used.
+rubato = { version = "0.16", default-features = false }
+hkdf = "0.13"
+libc = "0.2.191"
+quinn-proto = { version = "0.11", default-features = false, features = ["rustls-ring", "ring"] }
+bytes = "1"
+quinn = { version = "0.11", default-features = false, features = ["rustls", "ring", "runtime-tokio"] }
+# Held at 0.13 (the WebRTC stack brings 0.14 too): 0.14 encodes the KeyUsage bit string
+# differently, so the site authority's certificate, rebuilt from its key at every start
+# and held by every member, would change its bytes on the upgrade (checked 2026-11-08).
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+ring = "0.17"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = "1"
+serde_json = "1"
+# The APIs' push channel (`GET /api/v1/events`, a WebSocket on the connection's own thread).
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+sha2 = "0.11"
+# Joining a site with a typed code (§E.10.10): the password-authenticated exchange
+# (RustCrypto, MIT OR Apache-2.0, pure Rust).
+spake2 = { version = "0.4", default-features = false }
+socket2 = { version = "0.6.5", features = ["all"] }
+# PTP (the site clock, spec/extensions/idn-clock.md): the protocol, best master and servo.
+# statime 0.4.0 with PTP v1 (follower and leader) (third-party/statime, README-IDN.md; R.31). rand 0.8 only because statime's Port takes a rand 0.8 Rng.
+statime = { path = "../../third-party/statime", default-features = false, features = ["std"] }
+rand_08 = { package = "rand", version = "0.8.5", default-features = false, features = ["small_rng"] }
+time = "0.3"
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
+x509-parser = { version = "0.16", features = ["verify"] }
+# The web's certificate authorities, for the HTTP client (`web::httpc`).
+webpki-roots = { version = "1", optional = true }
+# Pictures on the GPU between programs on one machine (`gpu`, §E.27): the application's
+# wgpu device (MIT OR Apache-2.0), and Vulkan's external memory through ash (MIT OR
+# Apache-2.0), the version wgpu-hal uses.
+wgpu = { version = "=30.0.1", optional = true }
+bytemuck = { version = "1.25", optional = true }
+ash = { version = "0.38", optional = true }
+
+# Windows, for `gpu`: Direct3D 12's shared buffers and the handles' names (MIT OR
+# Apache-2.0; the version wgpu uses).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", optional = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common"] }
+# The session agent (node::session): the session in front, Setup's Node mode, VB-CABLE's setup;
+# `shutdown::install`: console control events, and a hidden window for log-off and shutdown.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_RemoteDesktop", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Security", "Win32_Security_Authorization"] }
+
+[features]
+# A small HTTP(S) client (`web::httpc`): the Industrial edition's polling, the switcher's
+# data sources.
+http-client = ["dep:webpki-roots"]
+# GPU pictures between programs on one machine (`gpu/1`, §E.27): an output or input given
+# the application's wgpu device. The switcher, idn-display and the OBS plugin use it.
+gpu = ["dep:wgpu", "dep:ash", "dep:windows", "dep:bytemuck"]
+
+
+[[example]]
+name = "gpu_recv"
+required-features = ["gpu"]

@@ -1,0 +1,37 @@
+[package]
+name = "idn-cli"
+description = "The one `idn` command (roadmap R.17): the IDN tools as subcommands, idn send, idn recv, idn mixer …"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[[bin]]
+name = "idn"
+path = "src/main.rs"
+# Its tests (tests/) run the program itself.
+test = false
+
+[dependencies]
+idn-open-protocol = { path = "../../core/idn-open-protocol" }
+idn-audio = { path = "../idn-audio" }
+idn-mixer = { path = "../idn-mixer" }
+# `idn iem listen`: the phone mixing library on this sound card (idn-iem.md §I.8).
+idn-iem = { path = "../idn-iem", features = ["play"] }
+idn-common = { path = "../../core/idn-common" }
+idn-data = { path = "../idn-data" }
+idn-omt = { path = "../../core/idn-omt" }
+idn-captions = { path = "../idn-captions" }
+idn-site-manager = { path = "../idn-site-manager" }
+serde_json = "1"
+# `idn asio`: the ASIO drivers listed (and IDN's registered for cwASIO hosts on Linux).
+idn-asio-abi = { path = "../../core/idn-asio-abi" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.191"
+
+[dev-dependencies]
+libc = "0.2.191"
+socket2 = { version = "0.6.5", features = ["all"] }

@@ -1,0 +1,25 @@
+[package]
+name = "idn-audio-plugins"
+description = "IDN Send and IDN Return: CLAP and VST3 plugins that send a track as an IDN source and play routed IDN sound into one (N8)"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[lib]
+# cdylib: the plugin file itself; rlib: the tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+idn-open-protocol = { path = "../../core/idn-open-protocol" }
+# CLAP (MIT OR Apache-2.0; pinned, pre-1.0), as the desk's plugin host uses.
+clack-plugin = "=0.2.0"
+clack-extensions = { version = "=0.2.0", features = ["clack-plugin", "params", "state", "audio-ports", "render"] }
+# VST3: bindings generated from Steinberg's SDK (MIT since VST 3.8), MIT OR Apache-2.0.
+vst3 = "=0.3.0"
+
+[dev-dependencies]
+serde_json = "1"

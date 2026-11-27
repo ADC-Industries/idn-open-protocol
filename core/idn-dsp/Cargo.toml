@@ -1,0 +1,13 @@
+[package]
+name = "idn-dsp"
+version = "0.3.8"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Sound processing the IDN programs share: noise suppression (the mixer's channels, the switcher's stream sound)"
+publish = false
+
+[dependencies]
+# RNNoise in Rust (BSD-3-Clause): steady noise out of speech.
+nnnoiseless = { version = "=0.5.2", default-features = false }
+# The conversions to and from the network's 48 kHz at other rates (§N.40).
+idn-open-protocol = { path = "../idn-open-protocol" }

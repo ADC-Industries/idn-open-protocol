@@ -1,0 +1,27 @@
+# IDN Site Manager (IDN Media) as a compose stack. One per site. Back up the volume: it
+# holds the site's CA and its devices (or use the panel's backup).
+#
+# On the site's own network the Site Manager is found by mDNS, which a container only
+# takes part in with the host's network (network_mode: host, Linux only). Elsewhere (a
+# VPS, Docker Desktop), give the IDN Nodes its address instead and keep --no-announce.
+services:
+  idn-site-manager:
+    image: idn-site-manager:latest
+    restart: unless-stopped
+    network_mode: host            # mDNS on the site's network; else the ports below
+    # ports:
+    #   - "29202:29202"             # the web panel (https)
+    #   - "5959:5959"             # the discovery server
+    #   - "29203:29203"           # Voice (the panel's port + 1)
+    #   - "29203:29203/udp"       # Voice for handsets over IDN's link (QUIC)
+    #   - "29207:29207/udp"       # Voice's calls
+    #   - "1883:1883"             # MQTT, when the site's broker is on
+    # command: ["--no-announce"]  # added to --trust-dir /data off the site's network
+    volumes:
+      - idn-site:/data
+    environment:
+      # The panel's site password, from your shell or an .env file beside this one
+      # (IDN_SITE_PASSWORD=...): compose stops if it isn't set. Applied at each start.
+      IDN_SITE_PASSWORD: "${IDN_SITE_PASSWORD:?set IDN_SITE_PASSWORD (the site password) first}"
+volumes:
+  idn-site:

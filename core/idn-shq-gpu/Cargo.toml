@@ -1,0 +1,17 @@
+[package]
+name = "idn-shq-gpu"
+description = "SpeedHQ pictures reconstructed on the GPU from their coefficients (the CPU reads the bitstream): for the switcher's compositor and for receivers that read the samples back (the OBS plugin)"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-common = { path = "../idn-common" }
+idn-open-protocol = { path = "../idn-open-protocol", features = ["gpu"] }
+# Vulkan, DX12 or Metal compute through wgpu (MIT OR Apache-2.0); the switcher's version.
+wgpu = "=30.0.1"
+# The coefficient words handed to the GPU as bytes without a copy (in wgpu's tree).
+bytemuck = "1.25"

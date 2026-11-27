@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IDN Node</title>
+<link rel="stylesheet" href="/ui/matrix.css">
+<link rel="stylesheet" href="/ui/shell.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body data-header="X-IDN-Node" data-who="machine">
+<header class="top">
+  <div class="brand"><div class="mark" aria-hidden="true">IDN</div><span>IDN Node</span><span class="host" id="machine">…</span></div>
+  <span class="pill off" id="pill"><span class="dot"></span><span id="pill-text">…</span></span>
+  <button type="button" class="search" id="search-open" aria-label="Search settings">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+    <span>Search settings</span><kbd>Ctrl K</kbd>
+  </button>
+  <div class="advt"><span id="adv-label">Advanced</span><button type="button" class="sw" id="adv" role="switch" aria-checked="false" aria-labelledby="adv-label"></button></div>
+  <button type="button" id="logout" class="btn q" hidden>Log out</button>
+</header>
+<div class="shell">
+  <nav class="rail" id="rail" aria-label="Settings sections"></nav>
+  <main class="main">
+    <div class="subtabs" id="subtabs"></div>
+    <div class="wrap">
+      <div id="attention"></div>
+      <div id="page"></div>
+      <p class="error" id="error" hidden></p>
+    </div>
+  </main>
+</div>
+<div class="save" id="save" role="region" aria-label="Unsaved changes" hidden>
+  <span class="chg"></span><strong id="save-count"></strong><span class="what" id="save-what"></span>
+  <div class="btns"><button type="button" class="btn q" id="discard">Discard</button><button type="button" class="btn pri" id="save-btn">Save</button></div>
+</div>
+<dialog id="search-box" aria-label="Search settings">
+  <input class="in" id="search-in" placeholder="Search settings" autocomplete="off" aria-controls="search-res">
+  <ul id="search-res" role="listbox"></ul>
+</dialog>
+<dialog id="wizard" aria-labelledby="wz-title">
+  <div class="wz-steps" id="wz-dots"></div>
+  <h2 id="wz-title"></h2>
+  <div id="wz-body"></div>
+  <p class="error" id="wz-error" hidden></p>
+  <div class="actions">
+    <button id="wz-next">Next</button>
+    <button id="wz-back" class="quiet">Back</button>
+    <button id="wz-skip" class="quiet">Skip the setup</button>
+  </div>
+</dialog>
+<datalist id="x-sources"></datalist>
+<datalist id="x-streams"></datalist>
+<script src="/ui/ui.js"></script>
+<script src="/ui/matrix.js"></script>
+<script src="/ui/video.js"></script>
+<script src="/ui/settings.js"></script>
+<script src="/ui/shell.js"></script>
+<script src="/pages.js"></script>
+<script src="/wizard.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+IDN Open Protocol
+Copyright (c) 2026 ADC Industries
+
+IDN's own code is licensed under the MIT License or the Apache License 2.0, at your
+option (LICENSE-MIT, LICENSE-APACHE), except the OBS plugin (media/idn-obs,
+media/idn-obs-loader), which is GPL-2.0-or-later.
+
+This repository also contains third-party code and data, each under its own licence.
+The licence files stay in each folder named below.
+
+Libraries kept as copies (vendor/, third-party/)
+------------------------------------------------
+
+vendor/cpal
+    cpal 0.18.2, Copyright the RustAudio cpal contributors
+    (https://github.com/RustAudio/cpal). Apache-2.0. Modified: the changed file is marked
+    (an ALSA patch); see vendor/README.md.
+
+vendor/quinn-proto
+    quinn-proto, Copyright (c) 2018 The quinn Developers. MIT OR Apache-2.0.
+    One marked patch (see vendor/README.md).
+
+vendor/rubato
+    rubato 0.16.2, Copyright (c) 2020 Henrik Enquist. MIT. One marked patch
+    (see vendor/README.md).
+
+vendor/whisper-rs-sys
+    whisper-rs-sys 0.15.0, the whisper-rs bindings (https://codeberg.org/tazz4843/whisper-rs),
+    the Unlicense. It contains whisper.cpp and ggml, Copyright (c) 2023-2024 The ggml
+    authors. MIT. Patched (four marked IDN patches; see vendor/README.md).
+
+vendor/libvmx
+    libvmx, https://github.com/openmediatransport/libvmx
+    Copyright (c) 2025 Open Media Transport Contributors. MIT.
+    Bundles sse2neon.h, Copyright (c) 2015-2024 SSE2NEON Contributors. MIT.
+
+third-party/statime
+    statime 0.4.0, Copyright (c) 2022-2023 Tweede Golf and Contributors.
+    MIT OR Apache-2.0. Includes Teodor Woźniak's PTP version 1 additions
+    (https://github.com/teodly/statime), under the same licence. IDN's own changes are
+    listed in its README-IDN.md.
+
+Code written from others' work (in IDN's crates)
+------------------------------------------------
+
+core/idn-omt
+    Open Media Transport: parts derived from libomtnet and libvmx,
+    Copyright (c) 2025 Open Media Transport Contributors. MIT (core/idn-omt/LICENSE-OMT.txt).
+
+core/idn-asio-abi
+    ASIO interface definitions written from the public headers of cwASIO
+    (https://github.com/s13n/cwASIO), Copyright (c) 2024 Stefan Heinzmann. MIT
+    (core/idn-asio-abi/NOTICE-cwASIO.txt). It contains nothing of Steinberg's ASIO SDK.
+
+Data
+----
+
+media/idn-switcher/fonts
+    DejaVu Sans and DejaVu Sans Bold. Copyright (c) 2003 by Bitstream, Inc. (Bitstream
+    Vera); DejaVu changes are in the public domain. Bitstream Vera licence
+    (media/idn-switcher/fonts/LICENSE-DejaVu.txt).
+
+Trademarks
+----------
+
+NDI® is a registered trademark of Vizrt NDI AB. Dante® is a registered trademark of
+Audinate Pty Ltd. ASIO is a trademark of Steinberg Media Technologies GmbH. Other names
+are trademarks of their respective owners. IDN is not affiliated with or endorsed by
+them. "NDI-Compatible" means that IDN interoperates with NDI devices and software.

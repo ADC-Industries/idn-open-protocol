@@ -1,0 +1,26 @@
+# IDN Site Manager (IDN Media's: spec/extensions/idn-node.md §N.11, §N.12) as a systemd
+# service: the idn-site-manager package installs it; its settings are in
+# /etc/idn-site-manager.env, the site in /var/lib/idn-site-manager.
+[Unit]
+Description=IDN Site Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/idn-site-manager.env
+ExecStart=/usr/bin/idn-site-manager --trust-dir /var/lib/idn-site-manager $IDN_SITE_MANAGER_ARGS
+StandardInput=null
+Restart=always
+RestartSec=5
+DynamicUser=yes
+StateDirectory=idn-site-manager
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

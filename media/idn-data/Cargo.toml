@@ -1,0 +1,20 @@
+[package]
+name = "idn-data"
+description = "IDN Data (roadmap R.22): data feeds as text-only IDN sources, run by the IDN Node as a service"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+idn-feeds = { path = "../../core/idn-feeds" }
+# http-client: feeds read from web addresses.
+idn-open-protocol = { path = "../../core/idn-open-protocol", features = ["http-client"] }
+serde_json = "1"
+# The downloaded yt-dlp checked against its release's SHA2-256SUMS (the library's
+# `hash::sha256_hex`), whose signature by yt-dlp's pinned key is checked (RSA, as the rest
+# of IDN's crypto).
+ring = "0.17"

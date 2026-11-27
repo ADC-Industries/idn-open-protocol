@@ -1,0 +1,47 @@
+[package]
+name = "idn-obs"
+description = "OBS Studio plugin on the IDN Open Protocol: IDN sources and outputs in OBS"
+# The plugin links OBS Studio's libobs (GPL-2.0-or-later), so the plugin as distributed
+# is GPL. The IDN Open Protocol library it uses stays MIT OR Apache-2.0.
+license = "GPL-2.0-or-later"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[lib]
+# An OBS plugin is a shared library OBS loads from its plugin directory.
+crate-type = ["cdylib"]
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+# With `gpu`: "IDN Source (GPU)" takes a source on this machine's pictures on the GPU
+# (§E.27) and hands them to OBS's renderer there.
+idn-open-protocol = { path = "../../core/idn-open-protocol", features = ["gpu"] }
+# The GPU source's device and its textures shared with OBS (MIT OR Apache-2.0).
+wgpu = "=30.0.1"
+# The IDN Output settings page's API.
+serde_json = "1"
+# Compressed video (NDI|HX cameras, codec/1) decoded through FFmpeg: the system's on
+# Linux, the one OBS ships on Windows (see README).
+idn-ffmpeg = { path = "../../core/idn-ffmpeg", features = ["gpu"] }
+# SpeedHQ's inverse DCT on the GPU, the samples read back for OBS.
+idn-shq-gpu = { path = "../../core/idn-shq-gpu" }
+
+# Keeping the plugin loaded until OBS ends (its threads may outlive OBS's unload).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+# Vulkan images exported as DMA-BUF for OBS's OpenGL (the version wgpu-hal uses).
+ash = "0.38"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
+# Direct3D 12 textures shared with OBS's Direct3D 11 (the version wgpu uses).
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common"] }
+
+[build-dependencies]
+# Bindings to libobs's C API are generated at build time from the installed headers
+# (libobs-dev); nothing from OBS is copied into this repository.
+bindgen = "0.72"
+pkg-config = "0.3"

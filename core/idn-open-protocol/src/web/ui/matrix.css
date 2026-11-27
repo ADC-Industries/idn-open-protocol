@@ -1,0 +1,35 @@
+/* The audio routing matrix (src/web/ui/matrix.js, served at /ui/matrix.css). */
+.matrix-wrap { overflow: auto; max-height: 70vh; margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.matrix { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.matrix th, .matrix td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 0; }
+.matrix thead th { position: sticky; top: 0; background: var(--card); z-index: 2; color: var(--muted); font-weight: 600; }
+.matrix thead tr:nth-child(2) th { top: 26px; }
+.matrix th.tx { padding: 4px 6px; white-space: nowrap; cursor: pointer; text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.matrix th.txch { width: 26px; min-width: 26px; height: 24px; text-align: center; font-weight: 500; }
+.matrix th.corner { position: sticky; left: 0; z-index: 3; background: var(--card); min-width: 180px; text-align: left; padding: 4px 8px; }
+.matrix th.rx { position: sticky; left: 0; background: var(--bg); text-align: left; padding: 5px 8px; white-space: nowrap; z-index: 1; color: var(--ink); }
+.matrix th.rx .sub { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.matrix th.rxch { position: sticky; left: 0; background: var(--card); text-align: left; padding: 2px 8px 2px 18px; white-space: nowrap; font-weight: 500; color: var(--muted); z-index: 1; }
+.matrix td.cell { width: 26px; height: 24px; text-align: center; cursor: pointer; }
+.matrix td.cell:hover { background: var(--bg); outline: 1px solid var(--accent); outline-offset: -1px; }
+.matrix td.folded { width: 14px; background: var(--bg); }
+.matrix td.group { background: var(--bg); }
+.legend { color: var(--muted); font-size: 13px; display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; margin: 8px 0 0; }
+.matrix th.rx .rx-latency { margin-left: 8px; font-size: 12px; padding: 1px 4px; font-weight: 400; }
+.matrix th.rx { cursor: pointer; }
+.matrix td.cell { user-select: none; }
+.matrix td.cell.dragging { background: color-mix(in srgb, var(--acc, #4c9af0) 35%, transparent); }
+.matrix td.group.foldnote { color: var(--muted); padding: 2px 8px; font-size: 11px; }
+/* The meters (idn-routing.md §A.15): a bar under each transmitter channel. */
+.matrix th.txch { position: relative; }
+.matrix th .meterbox { position: absolute; left: 3px; right: 3px; bottom: 2px; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.matrix th .meter { display: block; height: 100%; width: 0; background: var(--ok, #3fb950); transition: width .2s linear; }
+.matrix th .meter.mid { background: var(--warn, #d29922); }
+.matrix th .meter.hot { background: var(--bad, #f85149); }
+/* A route with sound arriving: its dot ringed. */
+.matrix .dot.sig { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok, #3fb950) 45%, transparent); }
+/* Devices on a network of Dante-compatible equipment (R.32 stage 1a): marked, and their
+   rows read only for now. */
+.matrix th.tx.netaudio { font-style: italic; }
+.matrix td.cell.readonly { cursor: default; }
+.matrix td.cell.readonly:hover { outline: none; background: inherit; }

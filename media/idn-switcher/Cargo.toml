@@ -1,0 +1,44 @@
+[package]
+name = "idn-switcher"
+description = "IDN video switcher (roadmap R.15): inputs, program and preview, transitions, overlays, sound and streams, as an embeddable engine"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-dsp = { path = "../../core/idn-dsp" }
+idn-common = { path = "../../core/idn-common" }
+idn-open-protocol = { path = "../../core/idn-open-protocol", features = ["http-client"] }
+serde_json = "1"
+# The typed commands and their JSON schema (`service::typed`, `GET /api/v1/schema`).
+serde = { version = "1", features = ["derive"] }
+schemars = "1"
+# Streams and recordings (RTMP/SRT/MP4) and H.264/HEVC inputs (NDI|HX) through FFmpeg, for
+# the program; the engine itself needs neither.
+idn-ffmpeg = { path = "../../core/idn-ffmpeg", optional = true }
+# The GPU compositor (§S.9 stage 3): Vulkan, DX12 or Metal through wgpu (MIT OR Apache-2.0).
+wgpu = { version = "=30.0.1", optional = true }
+# The coefficient words handed to the GPU as bytes without a copy (already in wgpu's tree).
+bytemuck = { version = "1.25", optional = true }
+# SpeedHQ reconstruction on the GPU (shared with the OBS plugin).
+idn-shq-gpu = { path = "../../core/idn-shq-gpu", optional = true }
+# Titles and text (§S.16): shaping, fallback fonts and glyphs, pure Rust (MIT OR Apache-2.0).
+cosmic-text = "=0.19.0"
+# A sound card as the program's sound (§S.6, stage 3).
+idn-audio = { path = "../idn-audio", optional = true }
+idn-feeds = { path = "../../core/idn-feeds" }
+# MQTT (§S.30): its state, commands, triggers and the cues' MQTT actions.
+rumqttc = { version = "0.25", default-features = false }
+
+[features]
+default = ["ffmpeg", "gpu", "card"]
+gpu = ["dep:wgpu", "dep:bytemuck", "dep:idn-shq-gpu", "idn-open-protocol/gpu", "idn-ffmpeg?/gpu"]
+card = ["dep:idn-audio"]
+ffmpeg = ["dep:idn-ffmpeg"]
+
+[dev-dependencies]
+# The push channel's test (a WebSocket client).
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }

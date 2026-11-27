@@ -1,0 +1,38 @@
+[package]
+name = "idn-camera-source"
+description = "IDN Camera's media source on Windows 11: the DLL Windows' Frame Server loads for the virtual camera, showing what idn-display writes (spec/extensions/idn-display.md §D.5)"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[lib]
+# idn_camera.dll (Windows); nothing elsewhere.
+name = "idn_camera"
+crate-type = ["cdylib"]
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+idn-vcam = { path = "../idn-vcam" }
+
+# Media Foundation, COM, the shared memory (MIT OR Apache-2.0; the version in the tree).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_Media_KernelStreaming",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_System_Memory",
+    "Win32_System_RemoteDesktop",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Registry",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
+windows-core = "=0.62.2"

@@ -1,0 +1,61 @@
+[package]
+name = "idn-display"
+description = "Shows an IDN or NDI-Compatible source full screen on a display: projectors, confidence monitors (Wave 3, spec/extensions/idn-display.md)"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+# With `gpu`: a source on this machine and this GPU hands its pictures over GPU to GPU
+# (§E.27).
+idn-open-protocol = { path = "../../core/idn-open-protocol", features = ["gpu"] }
+# SpeedHQ reconstructed on the GPU from its coefficients (efficiency #3, §E.27).
+idn-shq-gpu = { path = "../../core/idn-shq-gpu" }
+# The monitor's overlay text (the 5×7 font).
+idn-common = { path = "../../core/idn-common" }
+# The source's sound on the display's sound card (an HDMI projector's speakers).
+idn-audio = { path = "../idn-audio" }
+# Drawing: Vulkan, DX12 or Metal (the version the switcher uses).
+wgpu = "=30.0.1"
+# Windows and screens on Windows, X11, Wayland and macOS (Apache-2.0).
+# The viewer's clipboard, sent before a paste under remote control (R.25).
+idn-input = { path = "../../core/idn-input" }
+winit = "=0.30.13"
+serde_json = "1"
+# The display service's settings and typed commands, and their JSON schema (§D.8,
+# `GET /api/v1/schema`), as the switcher's and the desk's.
+serde = { version = "1", features = ["derive"] }
+schemars = "1"
+# The fallback's logo and slides (PNG, JPEG), pure Rust (MIT OR Apache-2.0 / MIT OR
+# Apache-2.0 OR Zlib).
+png = "0.18"
+zune-jpeg = "0.5"
+
+# A display with no desktop on Linux: the screens (connectors and their modes) through
+# DRM/KMS (MIT); wgpu draws to it directly.
+[target.'cfg(target_os = "linux")'.dependencies]
+drm = "=0.15.0"
+# The virtual camera's device calls (v4l2loopback).
+libc = "0.2"
+wgpu = { version = "=30.0.1", features = ["drm"] }
+
+# IDN Camera on Windows 11 (§D.5): the virtual camera, and the shared memory its media
+# source (idn-vcam's DLL) reads.
+[target.'cfg(windows)'.dependencies]
+idn-vcam = { path = "../idn-vcam" }
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_SystemInformation",
+    # Gamepads for remote control (R.25 stage 2).
+    "Win32_UI_Input_XboxController",
+] }
+

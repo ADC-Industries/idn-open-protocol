@@ -1,0 +1,34 @@
+[package]
+name = "idn-mixer"
+description = "IDN virtual mixing desk (roadmap R.16): channel strips, buses, meters and scenes on the routing matrix, as an embeddable engine"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-dsp = { path = "../../core/idn-dsp" }
+idn-common = { path = "../../core/idn-common" }
+idn-open-protocol = { path = "../../core/idn-open-protocol" }
+# Plugins run in a helper process (§M.6).
+idn-plugin-host = { path = "../idn-plugin-host" }
+# The IEM flow's wire format and Opus coding (§M.26, idn-iem.md), shared with the phones.
+idn-iem = { path = "../idn-iem" }
+# The IEM multicast copy's outgoing interface (IP_MULTICAST_IF, idn-iem.md §I.4.1).
+socket2 = { version = "0.6.5", features = ["all"] }
+# A sound card on the desk directly (§M.6).
+idn-audio = { path = "../idn-audio" }
+# Mackie Control surfaces (§M.6).
+midir = "0.11"
+# The strips' filters (pinned: its latest docs build failed upstream; checked here).
+fundsp = { version = "=0.23.0", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The typed commands' JSON schema (`GET /api/v1/schema`).
+schemars = "1"
+
+[dev-dependencies]
+# The push channel's test (a WebSocket client).
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }

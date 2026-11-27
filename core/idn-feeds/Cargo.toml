@@ -1,0 +1,12 @@
+[package]
+name = "idn-feeds"
+version = "0.3.8"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Data feeds read as rows: a Google Sheet, CSV/TSV, JSON, XML or RSS, from a file or an address (IDN Data's feeds, the switcher's titles)"
+publish = false
+
+[dependencies]
+# http-client: feeds read from web addresses.
+idn-open-protocol = { path = "../idn-open-protocol", features = ["http-client"] }
+serde_json = "1"

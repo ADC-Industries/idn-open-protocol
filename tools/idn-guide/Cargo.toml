@@ -1,0 +1,12 @@
+[package]
+name = "idn-guide"
+version = "0.3.8"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Makes the user guide (docs/guide) into static HTML pages, read with no server or internet (G7)"
+publish = false
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+# Markdown to HTML (MIT).
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

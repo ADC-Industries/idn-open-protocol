@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>IDN Voice</title>
+<link rel="stylesheet" href="{{BASE}}/app.css">
+<script>window.VOICE_BASE = '{{BASE}}';</script>
+</head>
+<body>
+<header class="top">
+  <h1>IDN Voice</h1>
+  <span id="link" class="pill off" title="Connection">offline</span>
+  <nav id="tabs" hidden>
+    <button data-view="channels" class="on">Channels</button>
+    <button data-view="dispatch" id="tab-dispatch" hidden>Dispatch</button>
+    <button data-view="people">People</button>
+    <button data-view="settings">Settings</button>
+    <button data-view="manage" id="tab-manage" hidden>Manage</button>
+  </nav>
+  <span id="me" class="me"></span>
+</header>
+
+<main>
+  <section id="signin" class="card narrow" hidden>
+    <h2>Sign in</h2>
+    <form id="login-form">
+      <label>Name <input name="user" autocomplete="username" required></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="primary">Sign in</button>
+    </form>
+    <p class="or">or join as a guest</p>
+    <form id="guest-form">
+      <label>Your name <input name="guest" maxlength="40" required></label>
+      <button type="submit">Join as a guest</button>
+    </form>
+    <p id="signin-error" class="error" role="alert"></p>
+  </section>
+
+  <section id="view-channels" class="view" hidden>
+    <div id="joined" class="strips"></div>
+    <div class="card">
+      <h2>Channels</h2>
+      <ul id="channel-list" class="list"></ul>
+      <p id="no-channels" class="muted" hidden>No channels yet. An administrator makes them under Manage.</p>
+    </div>
+  </section>
+
+  <section id="view-dispatch" class="view" hidden>
+    <div class="card dispatch-bar">
+      <button id="all-call" class="talk big">Hold for all-call</button>
+      <span class="muted">Talks into every channel you're in.</span>
+    </div>
+    <div id="dispatch-strips" class="strips compact"></div>
+  </section>
+
+  <section id="view-people" class="view" hidden>
+    <div id="call-panel" class="card call" hidden>
+      <h2 id="call-title">Call</h2>
+      <p id="call-state" class="muted"></p>
+      <button id="call-talk" class="talk big">Hold to talk</button>
+      <button id="call-hangup" class="danger">Hang up</button>
+    </div>
+    <div class="card">
+      <h2>People on now</h2>
+      <ul id="people" class="list"></ul>
+      <p class="muted">Call rings them; hold Talk to speak to them straight away.</p>
+    </div>
+    <div class="card" id="direct-card" hidden>
+      <h2 id="direct-title">Messages</h2>
+      <div id="direct-log" class="log"></div>
+      <form id="direct-form" class="send"><input name="text" maxlength="2000" placeholder="Message" required><button>Send</button></form>
+    </div>
+  </section>
+
+  <section id="view-settings" class="view" hidden>
+    <div class="card narrow">
+      <h2>Settings</h2>
+      <label>Microphone <select id="mic"></select></label>
+      <label>Speaker <select id="speaker"></select></label>
+      <label id="instant-row">Instant talk to me from
+        <select id="instant-from">
+          <option value="anyone">anyone</option>
+          <option value="dispatch">dispatch only</option>
+          <option value="never">no one (calls only)</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="tones" checked> Talk and busy tones</label>
+      <p class="muted" id="media-path"></p>
+      <button id="logout">Sign out</button>
+    </div>
+  </section>
+
+  <section id="view-manage" class="view" hidden>
+    <div class="card">
+      <h2>Channels</h2>
+      <table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Way in</th><th>Recorded</th><th></th></tr></thead><tbody id="manage-list"></tbody></table>
+      <button id="new-channel" class="primary">New channel</button>
+    </div>
+    <div class="card" id="channel-editor" hidden>
+      <h2 id="editor-title">New channel</h2>
+      <form id="channel-form">
+        <input type="hidden" name="id" value="0">
+        <label>Name <input name="name" maxlength="64" required></label>
+        <label>Description <input name="description" maxlength="500"></label>
+        <label>Kind
+          <select name="kind">
+            <option value="walkie">Walkie-Talkie</option>
+            <option value="iem">IEM (a fed source, listen only)</option>
+          </select>
+        </label>
+        <div class="walkie-only">
+          <label class="check"><input type="checkbox" name="half_duplex"> Half duplex (one talker at a time)</label>
+          <label>Talk time limit, seconds (half duplex; 0: none) <input name="limit_s" type="number" min="0" max="3600" value="60"></label>
+          <label>Talks from an IDN source while it has sound (e.g. the desk's talkback) <input name="talk_source" placeholder="PC (Mixer Talkback)"></label>
+        </div>
+        <div class="iem-only" hidden>
+          <label>Source (an IDN source, e.g. a mixer's aux) <input name="source" placeholder="PC (Mixer Aux 1)"></label>
+        </div>
+        <label>Way in
+          <select name="access">
+            <option value="open">Open: any signed-in user</option>
+            <option value="guest">Guest: anyone with a name</option>
+            <option value="password">Password</option>
+            <option value="auth">Auth: chosen users and roles</option>
+          </select>
+        </label>
+        <div class="password-only" hidden><label>Password <input name="password" type="password" autocomplete="new-password" placeholder="(unchanged if empty)"></label></div>
+        <div class="auth-only" hidden>
+          <p class="muted">Who may enter (and talk):</p>
+          <div id="allow-list"></div>
+          <button type="button" id="allow-add">Add a user or role</button>
+        </div>
+        <label class="check"><input type="checkbox" name="record" checked> Record transmissions</label>
+        <label class="check"><input type="checkbox" name="as_source"> Make this channel an IDN source ("Voice <i>name</i>") for a desk input</label>
+        <div class="row">
+          <button type="submit" class="primary">Save</button>
+          <button type="button" id="editor-cancel">Cancel</button>
+          <button type="button" id="editor-delete" class="danger" hidden>Delete</button>
+        </div>
+        <p id="editor-error" class="error" role="alert"></p>
+        <div id="editor-qr" class="qr" hidden></div>
+      </form>
+    </div>
+    <div class="card narrow">
+      <h2>Voice settings</h2>
+      <form id="settings-form">
+        <label>Keep recordings and messages, days (0: until deleted) <input name="keep_days" type="number" min="0" max="3650"></label>
+        <p class="muted">Dispatch (priority in half duplex, all-call):</p>
+        <div id="dispatch-list"></div>
+        <button type="button" id="dispatch-add">Add a user or role</button>
+        <div class="row"><button type="submit" class="primary">Save</button></div>
+        <p id="settings-msg" class="muted"></p>
+      </form>
+    </div>
+  </section>
+</main>
+
+<div id="ring" class="overlay" hidden>
+  <div class="card ringing">
+    <h2 id="ring-from">Call</h2>
+    <div class="row"><button id="ring-answer" class="primary">Answer</button><button id="ring-decline" class="danger">Decline</button></div>
+  </div>
+</div>
+
+<div id="messages-panel" class="sheet" hidden>
+  <div class="sheet-head"><h2 id="messages-title">Messages</h2><button id="messages-close" aria-label="Close">×</button></div>
+  <div id="messages-log" class="log"></div>
+  <form id="messages-form" class="send"><input name="text" maxlength="2000" placeholder="Message" required><button>Send</button></form>
+</div>
+
+<template id="strip">
+  <article class="strip">
+    <div class="strip-head">
+      <strong class="name"></strong>
+      <span class="badge kind"></span>
+      <span class="members muted"></span>
+    </div>
+    <div class="talkers"></div>
+    <div class="controls">
+      <button class="talk">Hold to talk</button>
+      <label class="vol">Volume <input type="range" min="0" max="150" value="100"></label>
+      <button class="mute">Mute</button>
+      <button class="msgs">Messages <span class="unread"></span></button>
+      <button class="missed" hidden>Missed</button>
+      <button class="leave">Leave</button>
+    </div>
+  </article>
+</template>
+
+<script src="{{BASE}}/app.js"></script>
+</body>
+</html>

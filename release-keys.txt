@@ -1,0 +1,17 @@
+# The public keys that sign IDN releases (G10, idn-node.md §N.23): one a line, 64 hex
+# digits. IDN machines install only a release signed by one of these.
+#
+# ADC Industries' keys are on YubiKeys (the key is made on the YubiKey and never leaves
+# it; each signature needs its PIN and a touch): a main one and a spare, both listed, so
+# losing one doesn't stop updates. To make one (once per YubiKey), on the Windows PC with
+# it: run make-key.cmd from a release folder (scripts/release.sh), or
+#   idn-release card-pins      (away from the factory PINs)
+#   idn-release card-keygen
+# and put the public key it prints below (then build, so every program carries it).
+#
+# Until the YubiKeys come: a key in a file sealed with a passphrase, on a USB stick
+# (make-file-key.cmd, or idn-release keygen E:\idn-release.key); its key below comes off
+# once both YubiKeys are listed.
+#
+# Interim file key (USB stick, passphrase), from 2026-10-30; remove once both YubiKeys are listed.
+999d622f04fc040944d43070757b92c28ab234b43973ba3adb5b20128323eaac

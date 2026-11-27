@@ -1,0 +1,18 @@
+[package]
+name = "idn-obs-loader"
+description = "The IDN plugin's idn_obs.dll on Windows: loads the plugin built for the FFmpeg the running OBS Studio ships (FFmpeg 7 for OBS 32, FFmpeg 8 for OBS 33)"
+# Part of the OBS plugin as distributed (GPL, see media/idn-obs).
+license = "GPL-2.0-or-later"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[lib]
+# idn_obs_loader.dll, installed as OBS's idn_obs.dll (Windows); nothing elsewhere.
+name = "idn_obs_loader"
+crate-type = ["cdylib"]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }

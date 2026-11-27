@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en" data-accent-home="amber">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IDN Site Manager | Industrial</title>
+<link rel="stylesheet" href="/ui/shell.css">
+<style>
+/* This page's own, in the shared look (/ui/shell.css): its cards' tables and controls. */
+:root{--fg:var(--ink);--accent-fg:var(--onacc);--chip:var(--surf2)}
+[data-card] .card{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-top:22px}
+[data-card] .card>h2{font-size:12px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+[data-card] th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+[data-card] td,[data-card] th{padding:7px 8px 7px 0}
+[data-card] button.ghost{padding:4px 10px;background:transparent;color:var(--ink);border-color:var(--line);font-weight:600}
+[data-card] button.ghost.danger{color:var(--bad);border-color:var(--bad)}
+[data-card] .row input{flex:1 1 160px}
+[data-card] input,[data-card] select,[data-card] textarea{min-width:0}
+tr.m{cursor:pointer}tr.m:hover td{background:var(--surf2)}
+.mdot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;background:var(--muted)}
+.mdot.on{background:var(--ok)}.mdot.rev{background:var(--bad)}
+.chip{display:inline-block;background:var(--surf2);border:1px solid var(--line);border-radius:10px;padding:0 8px;margin:0 4px 2px 0;font-size:12px}
+.muted{color:var(--muted)}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.token{font-family:var(--mono);word-break:break-all;background:var(--surf2);padding:8px;border-radius:8px;margin:8px 0}
+.vals{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 16px;padding:6px 0}
+.vals div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dotted var(--line);min-width:0}
+.vals div span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.vals div span:last-child{white-space:nowrap;flex:none}
+code{font-family:var(--mono);font-size:13px}
+.wide{overflow-x:auto}
+.login{max-width:400px;margin:60px auto;background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:20px 22px}
+.login h2{margin:0 0 12px;font-size:18px}
+.login .in{margin-bottom:8px}
+#err{color:var(--bad);min-height:1em;margin-top:6px}
+#me{color:var(--muted);font-size:14px}
+.mform{margin-top:22px}.mform .grp{margin-top:18px}
+.mtoml:not(:has(#mtext:not([hidden]))){display:none}
+.msave{margin-top:18px;padding:0;border:0}
+.mform .acts{display:flex;gap:14px;align-items:center}
+</style>
+</head>
+<body data-header="X-IDN-UI" data-who="Site Manager">
+<header class="top">
+  <div class="brand"><div class="mark" aria-hidden="true">IDN</div><span>IDN Site Manager</span><span class="host">Industrial</span></div>
+  <span class="pill off" id="pill" hidden><span class="dot"></span><span id="pill-text">…</span></span>
+  <button type="button" class="search" id="search-open" aria-label="Search" hidden>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+    <span>Search</span><kbd>Ctrl K</kbd>
+  </button>
+  <div class="advt" hidden><span id="adv-label">Advanced</span><button type="button" class="sw" id="adv" role="switch" aria-checked="false" aria-labelledby="adv-label"></button></div>
+  <span id="me" hidden></span>
+  <button type="button" id="logout" class="btn q" hidden>Log out</button>
+</header>
+<div id="login" class="login" hidden>
+<h2 id="lt">Log in</h2>
+<div id="setupKey" hidden><p class="muted">No administrator password yet. Give this Site Manager's API key (<code>IDN_API_KEY</code>, or <code>api.key</code> on its volume) and choose one.</p>
+<input class="in" id="apikey" placeholder="API key" autocomplete="off"></div>
+<input class="in" id="un" placeholder="User name (blank for the admin)" autocomplete="username">
+<input class="in" id="pw" type="password" placeholder="Password" onkeydown="if(event.key==='Enter')login()">
+<div><button class="btn pri" onclick="login()">Continue</button></div><div id="err"></div>
+</div>
+<div class="shell" id="shell" hidden>
+  <nav class="rail" id="rail" aria-label="Sections"></nav>
+  <main class="main">
+    <div class="subtabs" id="subtabs"></div>
+    <div class="wrap">
+      <div id="attention"></div>
+      <div id="page"></div>
+      <p class="error" id="error" hidden></p>
+    </div>
+  </main>
+</div>
+<div class="save" id="save" role="region" aria-label="Unsaved changes" hidden>
+  <span class="chg"></span><strong id="save-count"></strong><span class="what" id="save-what"></span>
+  <div class="btns"><button type="button" class="btn q" id="discard">Discard</button><button type="button" class="btn pri" id="save-btn">Save</button></div>
+</div>
+<dialog id="search-box" aria-label="Search">
+  <input class="in" id="search-in" placeholder="Search" autocomplete="off" aria-controls="search-res">
+  <ul id="search-res" role="listbox"></ul>
+</dialog>
+<div id="cards" hidden>
+<section id="t-machines">
+<div class="card wide"><h2>Machines</h2><table><thead><tr><th>Machine</th><th>Topic</th><th>Tags</th><th>Link</th><th>Version</th><th>Clock</th><th>Last seen</th><th></th></tr></thead><tbody id="ms"></tbody></table>
+<p class="muted" id="msEmpty" hidden>No machines yet: mint a token (Tokens) and give it to a machine's installer.</p></div>
+</section>
+
+<section id="t-tokens">
+<div class="card"><h2>New enrolment token</h2>
+<div class="row"><input id="tname" placeholder="Machine name (optional)"><input id="ttags" placeholder="Tags: plant=PD, role=batch"><input id="thours" placeholder="Valid for hours (24)" style="flex:0 1 170px"><button class="act" onclick="mint()">Mint</button></div>
+<div id="minted" hidden><div class="token" id="tokText"></div><button class="ghost" onclick="copyTok()">Copy</button> <span class="muted">Single use. Give it to the machine's installer or <code>idn-industrial enrol</code>.</span></div></div>
+<div class="card wide"><h2>Tokens</h2><table><thead><tr><th>Id</th><th>Name</th><th>Tags</th><th>Made</th><th>State</th><th></th></tr></thead><tbody id="ts"></tbody></table></div>
+</section>
+
+<section id="t-modules">
+<div class="card"><h2>Module settings</h2><p class="muted" style="margin-top:0">Pushed to machines as they are saved (and when they connect): for one machine (<code>machine:&lt;fingerprint&gt;</code>) or every machine with a tag (<code>tag:plant=PD</code>). Health, Modbus devices and HTTP polls; actions and writable Modbus points only come from a machine's own files.</p>
+<div class="row"><input id="mscope" placeholder="Scope: tag:plant=PD or machine:…"><input id="mname" placeholder="Name: plc" style="flex:0 1 180px"></div>
+<div class="row" style="margin-top:8px"><button class="ghost" id="mmode" onclick="modeSwap()">Edit as TOML</button><span class="muted">Actions, writable points, SQL connections, the local MQTT endpoint and the outbox are set on the machine itself.</span></div></div>
+<div id="mform" class="mform"></div><div class="card mtoml" id="mtoml-card">
+<textarea id="mtext" hidden spellcheck="false" style="width:100%;min-height:180px;margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:13px/1.4 ui-monospace,Consolas,monospace" placeholder='[[modbus]]
+name = "plc"
+address = "192.168.1.50:502"
+[[modbus.points]]
+name = "silo/3/level"
+address = 100
+scale = 0.1'></textarea>
+</div>
+<div class="row msave"><button class="act" onclick="saveModule()">Save and push</button><span id="mmsg" class="muted"></span></div>
+<div class="card wide"><h2>Pushed now</h2><table><thead><tr><th>Scope</th><th>Name</th><th>Lines</th><th></th></tr></thead><tbody id="mods"></tbody></table></div>
+</section>
+
+<section id="t-mqtt">
+<div class="card"><h2>MQTT logins</h2><p class="muted" style="margin-top:0">For the application server (and other MQTT 5 clients): <code>idn/&lt;machine&gt;/…</code> topics.</p>
+<div class="row"><input id="mu" placeholder="User name"><input id="mp" type="password" placeholder="Password (8+ characters)"><button class="act" onclick="addUser()">Add or change</button></div>
+<table style="margin-top:10px"><tbody id="us"></tbody></table></div>
+</section>
+
+<section id="t-screens">
+<div class="card wide"><h2>Remote screens</h2><p class="muted" style="margin-top:0">Watch or control a machine's screen (§I.11). The operator sees a banner unless the session is silent; every session is in the audit.</p>
+<table><thead><tr><th>Machine</th><th>Link</th><th></th></tr></thead><tbody id="scm"></tbody></table></div>
+<div class="card wide"><h2>Running now</h2><table><thead><tr><th>Machine</th><th>By</th><th>Mode</th><th>Since</th><th></th></tr></thead><tbody id="scs"></tbody></table></div>
+</section>
+
+<section id="t-chat">
+<div class="card"><h2>Message a station</h2><div class="row"><select id="chm" style="flex:1 1 200px;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)"></select></div>
+<div class="row" style="margin-top:8px"><input id="cht" placeholder="Message to show on the station" style="flex:1"><button class="act" onclick="sendChat()">Send</button></div>
+<p class="muted">A popup opens on the station; if no one is logged in, it waits for the next login. <span id="chmsg"></span></p></div>
+<div class="card"><h2>Conversation</h2><div id="chlog" style="max-height:340px;overflow:auto"></div></div>
+</section>
+
+<section id="t-updates">
+<div class="card wide"><h2>Releases</h2><p class="muted" style="margin-top:0">Signed releases of IDN Industrial (<code>idn-release make --product industrial …</code>). Each machine checks the signature and its package itself, installs, and goes back to what it ran if the new version hasn't checked in within ten minutes. Machines installed from the Linux package update with apt instead.</p>
+<div class="row" data-admin><input type="file" id="relFile" accept=".idnrelease"><button class="act" onclick="relUpload()">Add the release</button><span id="relMsg" class="muted"></span></div>
+<table style="margin-top:8px"><thead><tr><th>Version</th><th>Made</th><th>For</th><th>Notes</th><th></th></tr></thead><tbody id="rels"></tbody></table></div>
+<div class="card wide" data-admin><h2>Roll out</h2><p class="muted" style="margin-top:0">Try one machine first, then a tag or every machine (pinned machines are skipped unless named). A machine that isn't connected gets it when it connects, within a day.</p>
+<div class="row"><select id="upVer"></select><input id="upScope" placeholder="machine:<fingerprint>, tag:plant=PD or all" value="all"><select id="upWhen"><option value="now">now</option><option value="restart">at the next restart</option></select><button class="act" onclick="upOffer()">Offer</button><span id="upMsg" class="muted"></span></div></div>
+<div class="card wide"><h2>Machines</h2><table><thead><tr><th>Machine</th><th>Runs</th><th>Update</th><th>Pinned</th><th></th></tr></thead><tbody id="upMs"></tbody></table></div>
+</section>
+
+<section id="t-dead">
+<div class="card wide"><h2>Dead letters</h2><p class="muted" style="margin-top:0">Items an application refused (<code>idn/&lt;machine&gt;/nack/&lt;id&gt;</code> or <code>POST /api/dead-letters</code>), with its reason. Never dropped: resolve one when it's dealt with (it stays, marked), or send it again once the application can take it.</p>
+<div class="row"><label class="muted"><input type="checkbox" id="deadAll" onchange="deadTab()" style="width:auto"> resolved ones too</label></div>
+<table><thead><tr><th>When</th><th>Machine</th><th>Type</th><th>Reason</th><th>State</th><th></th></tr></thead><tbody id="dead"></tbody></table>
+<pre id="deadView" hidden style="white-space:pre-wrap;max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:8px"></pre></div>
+<div class="card wide"><h2>Commands waiting</h2><p class="muted" style="margin-top:0">Commands from applications held for a machine that isn't connected, until they're answered or expire (kept across a restart).</p>
+<table><thead><tr><th>Machine</th><th>Type</th><th>Expires</th></tr></thead><tbody id="held"></tbody></table></div>
+</section>
+
+<section id="t-audit">
+<div class="card wide"><h2>Audit</h2><p class="muted" style="margin-top:0">Append-only, kept two years: sessions, chat, actions, Modbus writes, enrolment and revocation.</p>
+<table><thead><tr><th>When</th><th>User</th><th>Machine</th><th>What</th><th>Detail</th></tr></thead><tbody id="aud"></tbody></table></div>
+</section>
+
+<section id="t-people">
+<div class="card"><h2>People and roles</h2><p class="muted" style="margin-top:0">Web-UI users. <b>Viewer</b> watches screens and the audit; <b>operator</b> also controls and chats; <b>administrator</b> does everything. The built-in <code>admin</code> login always has every right.</p>
+<div class="row"><input id="pu" placeholder="User name"><input id="pp" type="password" placeholder="Password (8+ characters)"><select id="pr" style="padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)"><option value="viewer">Viewer</option><option value="operator">Operator</option><option value="admin">Administrator</option></select><button class="act" onclick="addPerson()">Add or change</button></div>
+<table style="margin-top:10px"><tbody id="pl"></tbody></table></div>
+</section>
+
+<section id="t-site">
+<div class="card"><h2>Site</h2><table><tbody id="si"></tbody></table></div>
+<div class="card" data-admin><h2>Hold</h2><p class="muted">How long a message that no application has taken is kept for the first one to subscribe. 0: until one takes it.</p>
+<input id="hold" type="number" min="0" max="3650" style="width:90px" oninput="this.dataset.dirty=1"> days <button class="act" onclick="holdSave()">Save</button> <span id="holdmsg"></span></div>
+</section>
+</div>
+<script src="/ui/ui.js"></script>
+<script src="/ui/settings.js"></script>
+<script src="/ui/shell.js"></script>
+<script src="/ui/forms.js"></script>
+<script>
+let tab='machines',open=new Set(),setup=false,role='viewer';
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+async function api(path,opts){opts=opts||{};opts.credentials='same-origin';opts.headers=Object.assign({'X-IDN-UI':'1','Content-Type':'application/json'},opts.headers||{});const r=await fetch(path,opts);if(r.status===401&&path.startsWith('/api/')){location.reload();throw new Error('login');}return r;}
+function ago(ms){if(!ms)return '—';const s=Math.round((Date.now()-ms)/1000);if(s<60)return s+' s ago';if(s<3600)return Math.round(s/60)+' min ago';if(s<86400)return Math.round(s/3600)+' h ago';return new Date(ms).toLocaleString();}
+function bytes(n){if(typeof n!=='number')return esc(n);const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<4){n/=1024;i++;}return n.toFixed(i?1:0)+' '+u[i];}
+function tags(t){return Object.entries(t||{}).map(([k,v])=>'<span class="chip">'+esc(k)+'='+esc(v)+'</span>').join('');}
+function showLogin(){['shell','pill','search-open','me','logout'].forEach(i=>$(i).hidden=true);$('login').hidden=false;$('setupKey').hidden=!setup;$('un').hidden=setup;$('lt').textContent=setup?'Set the administrator password':'Log in';}
+async function state(){const j=await (await fetch('/ui/state')).json();setup=j.setup_needed;if(!j.logged_in){showLogin();return;}role=j.role||'viewer';
+document.querySelectorAll('[data-admin]').forEach(b=>b.hidden=role!=='admin');
+$('login').hidden=true;['shell','pill','search-open','me','logout'].forEach(i=>$(i).hidden=false);text($('me'),(j.user||'admin')+' ('+({admin:'administrator',operator:'operator',viewer:'viewer'}[role]||role)+')');startShell(j);}
+async function login(){$('err').textContent='';const body=setup?{api_key:$('apikey').value,password:$('pw').value}:{username:$('un').value,password:$('pw').value};
+const r=await fetch(setup?'/ui/setup':'/ui/login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+if(!r.ok){$('err').textContent=await r.text();return;}$('pw').value='';$('apikey').value='';state();}
+async function logout(){await fetch('/ui/logout',{method:'POST',credentials:'same-origin'});location.reload();}
+function fmtVal(k,v){const x=v&&typeof v==='object'&&'value' in v?v.value:v;if(/_bytes$/.test(k))return bytes(x);if(/_c$/.test(k))return esc(x)+' °C';if(/percent$/.test(k))return esc(x)+' %';if(/uptime_s$/.test(k))return (x/3600).toFixed(1)+' h';if(/_ms$/.test(k)&&x>1e12)return new Date(x).toLocaleString();if(x===true)return '<span class="ok">yes</span>';if(x===false)return /running$/.test(k)?'<span class="bad">no</span>':'no';if(x===null)return '<span class="muted">—</span>';return esc(typeof x==='object'?JSON.stringify(x):x);}
+async function machines(){const ms=await (await api('/api/machines')).json();$('msEmpty').hidden=ms.length>0;let h='';
+for(const m of ms){const on=m.online;const st=m.revoked?'<span class="mdot rev"></span>revoked':on?'<span class="mdot on"></span>'+esc(on.transport)+' <span class="muted">'+esc(on.address)+'</span>':'<span class="mdot"></span>offline';
+const clk=on?(Math.abs(on.clock_offset_ms)>2000?'<span class="warn">'+(on.clock_offset_ms/1000).toFixed(1)+' s</span>':'ok'):'—';
+h+='<tr class="m" data-fp="'+esc(m.fingerprint)+'"><td><b>'+esc(m.name)+'</b></td><td><code>'+esc(m.topic)+'</code></td><td>'+tags(m.tags)+'</td><td>'+st+'</td><td>'+esc(m.version||'—')+'</td><td>'+clk+'</td><td>'+(on?'now':ago(m.last_seen_ms))+'</td><td>'+(m.revoked?'':(role==='admin'?'<button class="ghost" data-tags="'+esc(m.fingerprint)+'" data-tv="'+esc(Object.entries(m.tags||{}).map(([k,v])=>k+'='+v).join(', '))+'">Tags</button> ':'')+(role!=='viewer'&&on?'<button class="ghost" data-logs="'+esc(m.fingerprint)+'" data-name="'+esc(m.name)+'">Logs</button> ':'')+'<button class="ghost danger" data-rev="'+esc(m.fingerprint)+'" data-name="'+esc(m.name)+'">Revoke</button>')+'</td></tr>';
+if(open.has(m.fingerprint))h+='<tr><td colspan="8"><div class="vals" id="v-'+esc(m.fingerprint)+'">…</div><div class="muted">Fingerprint <code>'+esc(m.fingerprint)+'</code></div></td></tr>';}
+$('ms').innerHTML=h;
+document.querySelectorAll('[data-logs]').forEach(b=>b.onclick=e=>{e.stopPropagation();getLogs(b.dataset.logs,b.dataset.name);});
+document.querySelectorAll('[data-tags]').forEach(b=>b.onclick=async e=>{e.stopPropagation();const t=prompt('Tags (key=value, comma separated), e.g. plant=PD, role=batch. Items already waiting keep the tags they arrived with.',b.dataset.tv);if(t===null)return;
+const o={};for(const p of t.split(',').map(x=>x.trim()).filter(Boolean)){const i=p.indexOf('=');if(i<1){alert('Not key=value: '+p);return;}o[p.slice(0,i).trim()]=p.slice(i+1).trim();}
+const r=await api('/api/machines/'+b.dataset.tags+'/tags',{method:'PUT',body:JSON.stringify(o)});if(!r.ok)alert(await r.text());machines();});
+document.querySelectorAll('tr.m').forEach(r=>r.onclick=e=>{if(e.target.dataset.rev||e.target.dataset.logs||e.target.dataset.tags)return;const f=r.dataset.fp;open.has(f)?open.delete(f):open.add(f);machines();});
+document.querySelectorAll('[data-rev]').forEach(b=>b.onclick=async e=>{e.stopPropagation();if(!confirm('Revoke '+b.dataset.name+'? It is cut off at once and must join again with a new token.'))return;await api('/api/machines/'+b.dataset.rev+'/revoke',{method:'POST'});machines();});
+for(const f of open){const el=$('v-'+f);if(!el)continue;const vr=await api('/api/machines/'+f+'/values');if(!vr.ok){el.innerHTML='<span class="muted">'+(vr.status===403?'Values need the operator role.':'Values not available.')+'</span>';continue;}const v=await vr.json();const ks=Object.keys(v).sort();el.innerHTML=ks.length?ks.map(k=>'<div><span class="muted" title="'+esc(k)+'">'+esc(k.replace(/^health\//,''))+'</span><span>'+fmtVal(k,v[k])+'</span></div>').join(''):'<span class="muted">No values yet.</span>';}}
+async function tokens(){const ts=await (await api('/api/tokens')).json();const now=Date.now();
+$('ts').innerHTML=ts.map(t=>{const st=t.used_by?'<span class="ok">used</span> <code class="muted">'+esc(t.used_by.slice(0,12))+'…</code>':t.expires_ms<now?'<span class="muted">expired</span>':'<span class="warn">open</span> until '+new Date(t.expires_ms).toLocaleString();
+return '<tr><td><code>'+esc(t.id)+'</code></td><td>'+esc(t.name||'—')+'</td><td>'+tags(t.tags)+'</td><td>'+ago(t.created_ms)+'</td><td>'+st+'</td><td>'+(!t.used_by?'<button class="ghost" data-w="'+esc(t.id)+'">Withdraw</button>':'')+'</td></tr>';}).join('')||'<tr><td colspan="6" class="muted">None yet.</td></tr>';
+document.querySelectorAll('[data-w]').forEach(b=>b.onclick=async()=>{await api('/api/tokens/'+b.dataset.w,{method:'DELETE'});tokens();});}
+async function mint(){const tg={};$('ttags').value.split(',').map(s=>s.trim()).filter(Boolean).forEach(p=>{const i=p.indexOf('=');if(i>0)tg[p.slice(0,i).trim()]=p.slice(i+1).trim();});
+const body={name:$('tname').value||null,tags:tg};const h=parseFloat($('thours').value);if(h>0)body.hours=h;
+const r=await api('/api/tokens',{method:'POST',body:JSON.stringify(body)});if(!r.ok){alert(await r.text());return;}const j=await r.json();$('tokText').textContent=j.token;$('minted').hidden=false;tokens();}
+function copyTok(){navigator.clipboard.writeText($('tokText').textContent);}
+let modsCache=[];
+async function mods(){formsReady();modsCache=await (await api('/api/modules')).json();
+$('mods').innerHTML=modsCache.map((m,i)=>'<tr><td><code>'+esc(m.scope.length>40?m.scope.slice(0,40)+'…':m.scope)+'</code></td><td>'+esc(m.name)+'</td><td>'+m.toml.split('\n').length+'</td><td style="text-align:right"><button class="ghost" data-e="'+i+'">Edit</button> <button class="ghost danger" data-d="'+i+'">Remove</button></td></tr>').join('')||'<tr><td colspan="4" class="muted">Nothing pushed.</td></tr>';
+document.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>{const m=modsCache[b.dataset.e];$('mscope').value=m.scope;$('mname').value=m.name;$('mtext').value=m.toml;$('mmsg').textContent='';
+if(m.json&&!asToml)mform=idnForms.settings($('mform'),m.json,{pushed:true});else{if(!asToml)modeSwap();}});
+document.querySelectorAll('[data-d]').forEach(b=>b.onclick=async()=>{const m=modsCache[b.dataset.d];if(!confirm('Remove '+m.name+' from '+m.scope+'? The machines drop it at once.'))return;await api('/api/modules/'+encodeURIComponent(m.scope)+'/'+encodeURIComponent(m.name),{method:'DELETE'});mods();});}
+let mform=null,asToml=false;
+function modeSwap(){asToml=!asToml;$('mtext').hidden=!asToml;$('mform').hidden=asToml;$('mmode').textContent=asToml?'Edit as a form':'Edit as TOML';
+if(!asToml){const m=modsCache.find(x=>x.scope===$('mscope').value.trim()&&x.name===$('mname').value.trim());mform=idnForms.settings($('mform'),m&&m.json||{},{pushed:true});}}
+function formsReady(){if(window.idnForms&&!mform)mform=idnForms.settings($('mform'),{},{pushed:true});}
+async function saveModule(){const path='/api/modules/'+encodeURIComponent($('mscope').value.trim())+'/'+encodeURIComponent($('mname').value.trim());
+const r=asToml||!mform?await api(path,{method:'PUT',headers:{'Content-Type':'text/plain'},body:$('mtext').value}):await api(path,{method:'PUT',body:JSON.stringify(mform.get())});
+if(!r.ok){$('mmsg').innerHTML='<span class="bad">'+esc(await r.text())+'</span>';return;}const j=await r.json();$('mmsg').innerHTML=j.warnings.length?'<span class="warn">Saved; '+j.warnings.map(esc).join('; ')+'</span>':'<span class="ok">Saved and pushed.</span>';mods();}
+async function users(){const us=await (await api('/api/mqtt-users')).json();$('us').innerHTML=us.map(u=>'<tr><td>'+esc(u)+'</td><td style="text-align:right"><button class="ghost danger" data-u="'+esc(u)+'">Remove</button></td></tr>').join('')||'<tr><td class="muted">No logins yet.</td></tr>';
+document.querySelectorAll('[data-u]').forEach(b=>b.onclick=async()=>{if(!confirm('Remove the login '+b.dataset.u+'?'))return;await api('/api/mqtt-users/'+encodeURIComponent(b.dataset.u),{method:'DELETE'});users();});}
+async function addUser(){const r=await api('/api/mqtt-users',{method:'POST',body:JSON.stringify({username:$('mu').value,password:$('mp').value})});if(!r.ok){alert(await r.text());return;}$('mp').value='';users();}
+async function site(){const s=await (await api('/api/site')).json();$('si').innerHTML='<tr><th>Site CA</th><td><code>'+esc(s.ca_fingerprint)+'</code></td></tr><tr><th>Machines connect to</th><td>'+(s.public_urls.map(u=>'<code>'+esc(u)+'</code>').join('<br>')||'<span class="bad">nothing set (IDN_PUBLIC_URLS)</span>')+'</td></tr><tr><th>MQTT clients now</th><td>'+(s.mqtt_clients.map(esc).join(', ')||'none')+'</td></tr><tr><th>Version</th><td>'+esc(s.version)+'</td></tr><tr><th>Hold</th><td>'+(s.hold_days?s.hold_days+' days':'until taken')+'</td></tr>';if(document.activeElement!==$('hold')&&!$('hold').dataset.dirty)$('hold').value=s.hold_days;}
+async function holdSave(){const r=await api('/api/site',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({hold_days:Number($('hold').value)})});if(r.ok)delete $('hold').dataset.dirty;$('holdmsg').innerHTML=r.ok?'<span class="ok">Saved.</span>':'<span class="bad">'+esc(await r.text())+'</span>';site();}
+// ---- remote support tabs ----
+async function machineOptions(){const ms=await (await api('/api/machines')).json();return ms.filter(m=>m.online);}
+async function screensTab(){const online=await machineOptions();
+$('scm').innerHTML=online.map(m=>'<tr><td><b>'+esc(m.name)+'</b> <span class="muted">'+esc(m.topic)+'</span></td><td><span class="mdot on"></span>'+esc(m.online.transport)+'</td><td style="text-align:right">'+
+'<button class="ghost" data-view="'+esc(m.fingerprint)+'">View</button> '+(role!=='viewer'?'<button class="ghost" data-ctl="'+esc(m.fingerprint)+'">Control</button>':'')+'</td></tr>').join('')||'<tr><td colspan="3" class="muted">No machine is connected.</td></tr>';
+const ss=await (await api('/api/screens')).json();
+$('scs').innerHTML=ss.map(s=>'<tr><td>'+esc(s.machine||'—')+'</td><td>'+esc(s.user)+'</td><td>'+(s.control?'control':'view')+'</td><td>'+ago(s.started_ms)+'</td><td style="text-align:right"><button class="ghost danger" data-stop="'+esc(s.session||'')+'">End</button></td></tr>').join('')||'<tr><td colspan="5" class="muted">None.</td></tr>';
+document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>openScreen(b.dataset.view,false));
+document.querySelectorAll('[data-ctl]').forEach(b=>b.onclick=()=>openScreen(b.dataset.ctl,true));
+document.querySelectorAll('[data-stop]').forEach(b=>b.onclick=async()=>{await api('/api/screen/'+encodeURIComponent(b.dataset.stop)+'/stop',{method:'POST'});screensTab();});}
+async function openScreen(fp,control){const notify=confirm('Notify the operator that someone is '+(control?'controlling':'viewing')+'?\n\nOK = notify, Cancel = silent.');
+const r=await api('/api/machines/'+fp+'/screen',{method:'POST',body:JSON.stringify({control,notify})});if(!r.ok){alert(await r.text());return;}
+const j=await r.json();window.open('/screen?session='+encodeURIComponent(j.session)+(control?'&control=1':''),'_blank','width=1120,height=720');}
+async function chatTab(){const online=await machineOptions();const sel=$('chm').value;$('chm').innerHTML=online.map(m=>'<option value="'+esc(m.fingerprint)+'">'+esc(m.name)+' ('+esc(m.topic)+')</option>').join('')||'<option value="">No machine connected</option>';if(sel)$('chm').value=sel;
+// Recent chat, both ways, from the audit (newest first → show oldest first).
+const a=await (await api('/api/audit?n=100')).json();
+const chat=a.filter(e=>e.kind==='chat').reverse();
+$('chlog').innerHTML=chat.map(e=>{const station=e.detail&&e.detail.to_station===false;const who=station?esc(e.machine||'station'):esc(e.user);const t=e.detail&&e.detail.text||'';return '<div style="margin:4px 0"><span class="'+(station?'ok':'muted')+'">'+who+'</span> <span class="muted" style="font-size:12px">'+new Date(e.time_ms).toLocaleTimeString()+'</span><br>'+esc(t)+'</div>';}).join('')||'<span class="muted">No messages yet.</span>';}
+async function sendChat(){const fp=$('chm').value;if(!fp){return;}const r=await api('/api/machines/'+fp+'/chat',{method:'POST',body:JSON.stringify({text:$('cht').value})});$('chmsg').textContent=r.ok?'Sent.':(await r.text());if(r.ok)$('cht').value='';}
+async function getLogs(fp,name){const r=await api('/api/machines/'+fp+'/logs',{method:'POST'});if(!r.ok){alert('The logs: '+await r.text());return;}const j=await r.json();
+let t='Logs of '+name+' ('+(j.machine||'')+'), '+new Date(j.at_ms).toLocaleString()+'\n';for(const [f,v] of Object.entries(j.files||{}))t+='\n===== '+f+(v.cut?' (its end)':'')+' =====\n'+v.text;
+const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/plain'}));a.download='logs-'+name.replace(/[^A-Za-z0-9-]+/g,'-')+'.txt';a.click();}
+async function updatesTab(){const rs=await (await api('/api/releases')).json();const admin=role==='admin';
+$('rels').innerHTML=rs.map(r=>'<tr><td><code>'+esc(r.version)+'</code></td><td>'+new Date(r.created*1000).toLocaleString()+'</td><td>'+r.platforms.map(p=>esc(p.platform)+' <span class="muted">'+Math.round(p.size/1048576)+' MB</span>').join(', ')+'</td><td>'+esc(r.notes)+'</td><td style="text-align:right">'+(admin?'<button class="ghost danger" data-rr="'+esc(r.version)+'">Remove</button>':'')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">No releases yet.</td></tr>';
+{const keep=$('upVer').value;$('upVer').innerHTML=rs.map(r=>'<option>'+esc(r.version)+'</option>').join('');if(keep&&rs.some(r=>r.version===keep))$('upVer').value=keep;}
+document.querySelectorAll('[data-rr]').forEach(b=>b.onclick=async()=>{if(!confirm('Remove the release '+b.dataset.rr+'?'))return;await api('/api/releases/'+encodeURIComponent(b.dataset.rr),{method:'DELETE'});updatesTab();});
+const pins=(await (await api('/api/updates')).json()).pinned;const ms=await (await api('/api/machines')).json();
+const rows=await Promise.all(ms.filter(m=>!m.revoked).map(async m=>{let u=null;try{const v=await (await api('/api/machines/'+m.fingerprint+'/values')).json();const x=(v||[]).find?v.find(e=>e.name==='node/update'):null;u=x?x.value:(v['node/update']?v['node/update'].value:null);}catch(e){}
+const st=u&&u.state?esc(u.state)+(u.version?' <code>'+esc(u.version)+'</code>':'')+(u.state==='downloading'?' '+(Math.max(0,Math.min(100,Number(u.progress)|0)))+'%':'')+(u.error?' <span class="bad">'+esc(u.error)+'</span>':''):'<span class="muted">—</span>';
+return '<tr><td>'+esc(m.name)+'</td><td><code>'+esc(m.version||'?')+'</code></td><td>'+st+'</td><td><input type="checkbox" style="width:auto" data-pin="'+m.fingerprint+'"'+(pins.includes(m.fingerprint)?' checked':'')+(admin?'':' disabled')+'></td><td style="text-align:right">'+(admin?'<button class="ghost" data-only="'+m.fingerprint+'">Offer to this one</button> <button class="ghost danger" data-rb="'+m.fingerprint+'">Roll back</button>':'')+'</td></tr>';}));
+$('upMs').innerHTML=rows.join('')||'<tr><td colspan="5" class="muted">No machines.</td></tr>';
+document.querySelectorAll('[data-pin]').forEach(b=>b.onchange=async()=>{await api('/api/machines/'+b.dataset.pin+'/pin',{method:'POST',body:JSON.stringify({pinned:b.checked})});});
+document.querySelectorAll('[data-only]').forEach(b=>b.onclick=()=>{$('upScope').value='machine:'+b.dataset.only;$('upScope').focus();});
+document.querySelectorAll('[data-rb]').forEach(b=>b.onclick=async()=>{if(!confirm('Put this machine\'s programs back as they were before its last update?'))return;const r=await api('/api/machines/'+b.dataset.rb+'/rollback',{method:'POST'});if(!r.ok)alert(await r.text());});}
+async function relUpload(){const f=$('relFile').files[0];if(!f)return;$('relMsg').textContent='Uploading '+Math.round(f.size/1048576)+' MB…';
+const r=await api('/api/releases',{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:f});$('relMsg').innerHTML=r.ok?'<span class="ok">Added.</span>':'<span class="bad">'+esc(await r.text())+'</span>';updatesTab();}
+async function upOffer(){const body={version:$('upVer').value,scope:$('upScope').value.trim()||'all',when:$('upWhen').value};if(!body.version)return;
+if(!confirm('Offer '+body.version+' to '+body.scope+' ('+(body.when==='now'?'now':'at the next restart')+')?'))return;
+const r=await api('/api/updates',{method:'POST',body:JSON.stringify(body)});if(!r.ok){$('upMsg').innerHTML='<span class="bad">'+esc(await r.text())+'</span>';return;}const j=await r.json();$('upMsg').innerHTML='<span class="ok">Offered to '+(j.machines.length?j.machines.map(esc).join(', '):'no machine')+'.</span>';updatesTab();}
+async function deadTab(){const v=await (await api('/api/dead-letters'+($('deadAll').checked?'?all=true':''))).json();const op=role!=='viewer';
+$('dead').innerHTML=v.map(d=>'<tr><td>'+new Date(d.at_ms).toLocaleString()+'</td><td>'+esc(d.machine||'?')+'</td><td><code>'+esc(d.type||'?')+'</code></td><td>'+(d.code?'<code>'+esc(d.code)+'</code> ':'')+esc(d.reason)+(d.times>1?' <span class="muted">(×'+d.times+')</span>':'')+'</td><td>'+(d.resolved?'<span class="ok">resolved</span> <span class="muted">'+esc(d.resolved.by)+(d.resolved.note?': '+esc(d.resolved.note):'')+'</span>':'<span class="bad">open</span>')+(d.retries?' <span class="muted">sent again '+d.retries+'×</span>':'')+'</td><td style="text-align:right"><button class="ghost" data-dv="'+d.n+'">View</button>'+(op&&!d.resolved?' <button class="ghost" data-dr="'+d.n+'"'+(d.kept?'':' disabled title="the item isn\'t kept any more"')+'>Send again</button> <button class="ghost" data-dx="'+d.n+'">Resolve</button>':'')+'</td></tr>').join('')||'<tr><td colspan="6" class="muted">None.</td></tr>';
+document.querySelectorAll('[data-dv]').forEach(b=>b.onclick=async()=>{const d=await (await api('/api/dead-letters/'+b.dataset.dv)).json();$('deadView').hidden=false;$('deadView').textContent=JSON.stringify(d,null,2);});
+document.querySelectorAll('[data-dr]').forEach(b=>b.onclick=async()=>{const r=await api('/api/dead-letters/'+b.dataset.dr+'/retry',{method:'POST'});if(!r.ok)alert(await r.text());deadTab();});
+document.querySelectorAll('[data-dx]').forEach(b=>b.onclick=async()=>{const note=prompt('A note (what was done):','');if(note===null)return;await api('/api/dead-letters/'+b.dataset.dx+'/resolve',{method:'POST',body:JSON.stringify({note})});deadTab();});
+const hc=await (await api('/api/commands')).json();$('held').innerHTML=hc.map(c=>'<tr><td>'+esc(c.machine)+'</td><td><code>'+esc(c.type)+'</code></td><td>'+new Date(c.deadline_ms).toLocaleString()+'</td></tr>').join('')||'<tr><td colspan="3" class="muted">None.</td></tr>';}
+async function auditTab(){const a=await (await api('/api/audit?n=300')).json();
+$('aud').innerHTML=a.map(e=>'<tr><td class="muted" style="white-space:nowrap">'+new Date(e.time_ms).toLocaleString()+'</td><td>'+esc(e.user)+'</td><td>'+esc(e.machine||'—')+'</td><td>'+esc(e.kind)+'</td><td class="muted"><code>'+esc(JSON.stringify(e.detail)).slice(0,120)+'</code></td></tr>').join('')||'<tr><td colspan="5" class="muted">Nothing yet.</td></tr>';}
+async function people(){const us=await (await api('/api/users')).json();
+$('pl').innerHTML=us.map(u=>'<tr><td><b>'+esc(u.name)+'</b></td><td>'+esc(u.role)+'</td><td style="text-align:right"><button class="ghost danger" data-pu="'+esc(u.name)+'">Remove</button></td></tr>').join('')||'<tr><td class="muted">Only the built-in admin so far.</td></tr>';
+document.querySelectorAll('[data-pu]').forEach(b=>b.onclick=async()=>{if(!confirm('Remove '+b.dataset.pu+'?'))return;await api('/api/users/'+encodeURIComponent(b.dataset.pu),{method:'DELETE'});people();});}
+async function addPerson(){const r=await api('/api/users',{method:'POST',body:JSON.stringify({username:$('pu').value,password:$('pp').value,role:$('pr').value})});if(!r.ok){alert(await r.text());return;}$('pp').value='';people();}
+let loading=false;async function load(){if(loading)return;loading=true;try{if(tab==='machines')await machines();else if(tab==='screens')await screensTab();else if(tab==='chat')await chatTab();else if(tab==='tokens')await tokens();else if(tab==='modules')await mods();else if(tab==='audit')await auditTab();else if(tab==='dead')await deadTab();else if(tab==='updates')await updatesTab();else if(tab==='people')await people();else if(tab==='mqtt')await users();else await site();}catch(e){}finally{loading=false;}}
+// The shared frame (/ui/shell.js): its sections and pages, each showing this page's cards.
+const IND_ICONS={
+machines:'<rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path>',
+modules:'<path d="M4 7h16M4 12h16M4 17h10"></path><circle cx="18" cy="17" r="2"></circle>',
+apps:'<path d="M4 6h16v10H8l-4 4z"></path>',
+updates:'<path d="M12 3v12M7 10l5 5 5-5"></path><path d="M5 21h14"></path>',
+site:'<path d="M3 21h18"></path><path d="M5 21V8l7-4 7 4v13"></path><path d="M9 21v-5h6v5"></path>',
+monitoring:'<path d="M3 12h4l3-8 4 16 3-8h4"></path>',
+appearance:'<circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"></path>'};
+const IND_PAGES={
+machines:{title:'Machines',lede:'The site’s machines: how each is doing, its tags, its logs. Click one for its values.',cards:['t-machines']},
+tokens:{title:'Enrolment tokens',nav:'Adding machines',lede:'A single-use token for each new machine’s installer.',cards:['t-tokens']},
+screens:{title:'Remote screens',lede:'Watch or control a machine’s screen.',cards:['t-screens']},
+chat:{title:'Messages',lede:'A message on a station’s screen, and its answers.',cards:['t-chat']},
+modules:{title:'Modules',lede:'Settings pushed to machines: health, Modbus devices and HTTP polls.',cards:['t-modules']},
+dead:{title:'Dead letters',lede:'What an application refused, and commands waiting for a machine.',cards:['t-dead']},
+mqtt:{title:'MQTT logins',lede:'For the application server and other MQTT clients.',cards:['t-mqtt']},
+updates:{title:'Updates',lede:'Signed releases of IDN Industrial, rolled out to machines.',cards:['t-updates']},
+site:{title:'Site',lede:'The site’s certificate authority, its address, and how long messages are held.',cards:['t-site']},
+people:{title:'People and roles',nav:'People',lede:'Who may use this panel, and what each may do.',cards:['t-people']},
+audit:{title:'Audit',lede:'Sessions, chat, actions, Modbus writes, enrolment and revocation.',cards:['t-audit']}};
+let started=false;
+function startShell(j){if(started)return;started=true;
+const sections=[
+{id:'machines',title:'Machines',pages:['machines','tokens','screens','chat']},
+{id:'modules',title:'Modules',pages:['modules']},
+{id:'apps',title:'Applications',pages:['dead','mqtt']},
+{id:'updates',title:'Updates',pages:['updates']},
+{id:'site',title:'Site',pages:role==='admin'?['site','people']:['site']},
+{id:'monitoring',title:'Monitoring',pages:['audit']}];
+if(role!=='admin')delete IND_PAGES.people;
+IdnShell.start({sections,pages:IND_PAGES,icons:IND_ICONS,home:'machines',advKey:'idn-industrial-advanced',
+statusUrl:'/ui/state',every:4000,
+header:s=>{if(!s.logged_in){location.reload();return;}$('pill').className='pill '+(!s.machines?'off':s.online<s.machines?'warn':'ok');text($('pill-text'),s.online+' of '+s.machines+' online');},
+onPage:id=>{tab=id;load();},
+onStatus:()=>{if(!['tokens','modules','people'].includes(tab))load();},
+unreachable:()=>{$('pill').className='pill bad';text($('pill-text'),'Server not reachable');},
+searchHint:'Type a page’s name: machines, tokens, modules, audit…'});}
+$('logout').onclick=logout;
+state();
+</script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+[package]
+name = "idn-ffmpeg"
+description = "Hardware video encoders and decoders for the IDN Open Protocol (codec/1), through the system's FFmpeg"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+# Links the system's FFmpeg libraries (LGPL) dynamically; they are not part of this crate.
+# Build them without GPL components for distribution (spec §E.18.1).
+[dependencies]
+idn-common = { path = "../idn-common" }
+idn-open-protocol = { path = "../idn-open-protocol" }
+# Keyboard and mouse of a screen the site's receivers control (R.25, idn-codec capture).
+idn-input = { path = "../idn-input", optional = true }
+ffmpeg-sys-next = { version = "9", default-features = false, features = ["avcodec", "avformat", "swscale", "swresample"] }
+# This computer's own sound with a screen (`idn capture --sound`, remote sessions), with
+# the `sound` feature (the media edition's idn-codec; not Industrial's helper).
+idn-audio = { path = "../../media/idn-audio", default-features = false, optional = true }
+# libavdevice (screens and webcams, R.19) is loaded at run time: only three of its
+# functions are needed, and it isn't everywhere FFmpeg is.
+libloading = "0.9"
+serde_json = "1"
+# Browser viewing over WebRTC (WHEP, R.12): sans-IO, pure Rust crypto (no OpenSSL).
+# IDN Voice feeds (voice_feed.rs): a WebSocket client.
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"], optional = true }
+str0m = { version = "=0.24.1", default-features = false, features = ["rust-crypto"], optional = true }
+# Pictures the GPU decoded kept there (`gpu`, §E.27): the application's wgpu device.
+wgpu = { version = "=30.0.1", optional = true }
+
+# Wayland screens (R.19): the desktop's screen-share portal over D-Bus (MIT); PipeWire
+# itself is loaded at run time.
+[target.'cfg(target_os = "linux")'.dependencies]
+# A Wayland desktop's screens read straight from the compositor (ext-image-copy-capture,
+# src/wayland/direct.rs): the versions winit already brings.
+wayland-client = { version = "0.31", optional = true }
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"], optional = true }
+# (remote_desktop: keyboard and mouse onto a shared Wayland screen, R.25.)
+ashpd = { version = "=0.13.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"], optional = true }
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "time"], optional = true }
+libc = "0.2"
+
+# Monitor enumeration for remote support (idn-industrial §I.11.3).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Threading"] }
+# Direct3D 12 decoding on the application's device (`gpu`, §E.27): wgpu's own version.
+# (Also this computer's displays by their identity, src/screens.rs: DXGI, GDI, DisplayConfig.)
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Dxgi", "Win32_Graphics_Gdi", "Win32_Devices_Display"] }
+
+[features]
+# Everything by default. A program that only decodes files and streams (the codecs, the
+# player, `media`, the gateways) builds with `default-features = false`: none of these
+# modules or their dependencies.
+default = ["capture", "whep", "voice"]
+# Screens and webcams as sources, remote sessions' keyboard and mouse, Wayland's screens
+# (`capture`, `remote`, `wayland`): idn-input, wayland-client/-protocols, ashpd, tokio.
+capture = ["dep:idn-input", "dep:wayland-client", "dep:wayland-protocols", "dep:ashpd", "dep:tokio"]
+# Browser viewing and phone listening over WebRTC (`whep`): str0m.
+whep = ["dep:str0m"]
+# IDN Voice feeds (`voice_feed`, `voice_out`): tungstenite.
+voice = ["dep:tungstenite"]
+# Decoded pictures kept on the GPU for an application that hands its device in (§E.27).
+gpu = ["dep:wgpu", "idn-open-protocol/gpu"]
+# `idn capture --sound`: the computer's own sound on its screen's source (idn-audio).
+sound = ["dep:idn-audio"]
+
+[[example]]
+name = "va_gpu_check"
+required-features = ["gpu"]
+
+[[bin]]
+name = "idn-codec"
+path = "src/bin/idn-codec/main.rs"
+required-features = ["capture", "whep", "voice"]

@@ -1,0 +1,8 @@
+The two Site Manager images build from the sources in this repository, in a Debian 12
+build stage with Rust 1.99.1, into a small Debian 12 image with the one program.
+From the repository's root:
+
+  docker build -f installer/docker/site-manager/Dockerfile -t idn-site-manager .
+  docker build -f installer/docker/site-manager-industrial/Dockerfile -t idn-site-manager-industrial .
+
+Then `docker compose up -d` beside each compose.yaml (or a Komodo stack of it).

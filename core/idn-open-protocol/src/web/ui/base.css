@@ -1,0 +1,169 @@
+/* The IDN web panels' shared stylesheet (src/web/ui.rs, served at /ui/base.css). Each
+   page's <body> is either "admin" (settings pages: the system's light or dark scheme,
+   centred column) or "console" (operator panels: always dark, denser). A panel's own
+   app.css adds only what is its own; the rules for one kind of page are inside :where()
+   so that a panel's own rules win by coming later. No inline styles anywhere: the panels'
+   Content-Security-Policy allows only style files. */
+
+:root, body.admin {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #1d2330; --muted: #5b6474; --line: #e2e5ea;
+  --field: #f6f7f9; --raised: #eef0f3;
+  --accent: #2459d6; --accent-fill: #2459d6;
+  --ok: #1f7a3f; --warn: #a15c00; --bad: #b3261e;
+  --ok-bg: #e5f4ea; --warn-bg: #fff2dc; --bad-bg: #fde8e7;
+  --mono: ui-monospace, "Cascadia Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root, body.admin {
+    --bg: #14171c; --card: #1c2027; --ink: #e7eaf0; --muted: #a0a8b6; --line: #2c323c;
+    --field: #121418; --raised: #2a3038;
+    --accent: #7aa2ff; --accent-fill: #3d74e0;
+    --ok: #7bd498; --warn: #f0b45a; --bad: #ff8a80;
+    --ok-bg: #18301f; --warn-bg: #33270f; --bad-bg: #3a1a18;
+  }
+}
+body.console {
+  --bg: #15171a; --card: #1f2226; --ink: #e8eaed; --muted: #9aa0a6; --line: #33383e;
+  --field: #121417; --raised: #2b3036;
+  --accent: #7aa2ff; --accent-fill: #3d74e0;
+  --ok: #81c995; --warn: #f9ab00; --bad: #f28b82;
+  --ok-bg: #18301f; --warn-bg: #33270f; --bad-bg: #3a1a18;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+/* The hidden attribute wins over the display rules below. */
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body.console { font-size: 13px; line-height: 1.4; }
+
+/* The bar at the top: the program's name, where it runs, its state. */
+.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; flex-wrap: wrap;
+  background: var(--card); border-bottom: 1px solid var(--line); }
+:where(.console) .top { gap: 14px; padding: 8px 14px; background: none; }
+.brand { font-weight: 700; letter-spacing: .2px; }
+.top .where { color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+:where(.admin) main { max-width: 920px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 16px;
+  grid-template-columns: minmax(0, 1fr); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+:where(.console) .card { border-radius: 8px; padding: 12px; }
+.card.attention { border-color: var(--warn); }
+h2 { margin: 0 0 10px; font-size: 16px; }
+:where(.console) h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
+
+.hint { color: var(--muted); margin: 4px 0; }
+.dim { color: var(--muted); }
+.small { font-size: 12px; }
+.error { color: var(--bad); }
+.mono, code, .log { font-family: var(--mono); font-size: 13px; }
+.code { font: 700 40px/1.1 var(--mono); letter-spacing: 6px; margin: 8px 0 2px; }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .facts { grid-template-columns: 1fr; } .facts dt { margin-top: 6px; } }
+
+/* Buttons: filled on settings pages; on consoles plain, coloured only when on. */
+button { font: inherit; padding: 7px 14px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--accent-fill); background: var(--accent-fill); color: #fff; }
+button.quiet { background: transparent; color: var(--accent); }
+button.danger { background: transparent; color: var(--bad); border-color: var(--bad); }
+:where(.console) button { background: var(--raised); color: var(--ink); border-color: var(--line); border-radius: 6px; padding: 6px 10px; }
+:where(.console) button:hover { border-color: var(--muted); }
+:where(.console) button.on, :where(.console) button.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+:where(.console) button.quiet { background: transparent; color: var(--ink); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+.actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+/* Forms: on settings pages a label above each field; on consoles side by side. */
+:where(.admin) form { display: grid; gap: 10px; margin-top: 14px; }
+:where(.admin) label { display: grid; gap: 4px; color: var(--muted); }
+:where(.console) label { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
+label.check { display: flex; align-items: center; gap: 8px; color: var(--ink); }
+input:where(:not([type=checkbox]):not([type=radio]):not([type=range])), select, textarea {
+  font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--field); color: var(--ink); }
+:where(.console) input:where(:not([type=checkbox]):not([type=radio]):not([type=range])), :where(.console) select {
+  padding: 4px 6px; border-radius: 5px; }
+
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+:where(.admin .row) input:where(:not([type=checkbox])) { flex: 1 1 140px; }
+
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.list li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.list li button { margin-top: 6px; }
+.list .sub { color: var(--muted); font-size: 13px; }
+.table { width: 100%; border-collapse: collapse; }
+.table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 13px; }
+.table th, .table td { padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.log { max-height: 280px; overflow: auto; margin: 0; white-space: pre-wrap; color: var(--muted); }
+
+/* States: a pill in the top bar, a tag beside a name, a dot in a list or table. */
+.pill { padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.pill.ok { background: var(--ok-bg); color: var(--ok); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.bad { background: var(--bad-bg); color: var(--bad); }
+.tag { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.tag.ok { color: var(--ok); border-color: var(--ok); }
+.tag.bad { color: var(--bad); border-color: var(--bad); }
+.tag.warn { color: var(--warn); border-color: var(--warn); }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; background: var(--muted); }
+.dot.ok { background: var(--ok); }
+.dot.connecting { background: var(--warn); }
+.dot.no_source, .dot.no_channel, .dot.rates_differ, .dot.failed { background: var(--bad); }
+.dot.offline { background: var(--muted); opacity: .6; }
+
+/* An on/off switch: <label class="switch"><input type="checkbox"><span></span></label>. */
+.switch { position: relative; width: 40px; height: 22px; flex: none; }
+.switch input { opacity: 0; width: 100%; height: 100%; margin: 0; position: absolute; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background .15s; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.switch input:checked + span { background: var(--ok); }
+.switch input:checked + span::after { transform: translateX(18px); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:disabled + span { opacity: .5; }
+
+/* The login page (/ui login_page). */
+.login { max-width: 420px; margin: 10vh auto 0; }
+.login h2 { font-size: 16px; text-transform: none; letter-spacing: 0; color: var(--ink); }
+.login form { display: grid; gap: 10px; margin-top: 14px; }
+.login label { display: grid; gap: 4px; margin: 0; color: var(--muted); }
+
+/* Small utilities. */
+.w52 { width: 52px; } .w56 { width: 56px; } .w60 { width: 60px; } .w64 { width: 64px; } .w70 { width: 70px; }
+.grow { flex: 1; }
+.mt8 { margin-top: 8px; }
+.flexrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.inline { display: inline-flex; }
+.plain { text-transform: none; letter-spacing: 0; }
+.band { display: flex; gap: 4px; flex-wrap: wrap; margin: 3px 0; }
+
+/* The look the viewer chose for this browser (ui.js: Automatic, Dark or Light, and an
+   accent), over the page's own: a console panel can be light, a settings page dark. */
+html[data-theme="light"] body {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #1d2330; --muted: #5b6474; --line: #e2e5ea;
+  --field: #f6f7f9; --raised: #eef0f3;
+  --accent: #2459d6; --accent-fill: #2459d6;
+  --ok: #1f7a3f; --warn: #a15c00; --bad: #b3261e;
+  --ok-bg: #e5f4ea; --warn-bg: #fff2dc; --bad-bg: #fde8e7;
+  color-scheme: light;
+}
+html[data-theme="dark"] body {
+  --bg: #14171c; --card: #1c2027; --ink: #e7eaf0; --muted: #a0a8b6; --line: #2c323c;
+  --field: #121418; --raised: #2a3038;
+  --accent: #7aa2ff; --accent-fill: #3d74e0;
+  --ok: #7bd498; --warn: #f0b45a; --bad: #ff8a80;
+  --ok-bg: #18301f; --warn-bg: #33270f; --bad-bg: #3a1a18;
+  color-scheme: dark;
+}
+html[data-accent="amber"] body { --accent: #e0902a; --accent-fill: #c67a12; }
+html[data-accent="green"] body { --accent: #3fae68; --accent-fill: #2b8a4f; }
+html[data-accent="violet"] body { --accent: #9b7cf0; --accent-fill: #7552d8; }
+html[data-accent="cyan"] body { --accent: #2fb3d6; --accent-fill: #1b8fb0; }
+.look { display: inline-flex; gap: 4px; align-items: center; }
+.look select { padding: 3px 6px; font-size: 12px; }
+

@@ -1,0 +1,6 @@
+# The Site Managers' images build from this repository (installer/docker/*/Dockerfile):
+# what the build needs is the sources; never the build output (hundreds of GB here).
+target/
+**/target/
+.git/
+*.log

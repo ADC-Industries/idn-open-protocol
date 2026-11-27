@@ -1,0 +1,31 @@
+[package]
+name = "idn-captions"
+description = "IDN captions (G2): live speech-to-text on this machine (whisper.cpp) from an IDN sound source, sent as a text-only IDN source"
+license = "MIT OR Apache-2.0"
+authors = ["ADC Industries"]
+version = "0.3.8"
+edition = "2024"
+# Never published to crates.io.
+publish = false
+
+[dependencies]
+idn-common = { path = "../../core/idn-common" }
+idn-open-protocol = { path = "../../core/idn-open-protocol", features = ["http-client"] }
+serde_json = "1"
+sha2 = "0.11"
+whisper-rs = { version = "=0.16.0", default-features = false }
+whisper-rs-sys = "=0.15.0"
+
+# The captions worker (worker.rs): its nice value and descriptors; its priority class and standard handles.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
+
+[features]
+default = ["gpu"]
+# whisper on the GPU through Vulkan: any GPU whose driver has
+# Vulkan (integrated, AMD, Intel, NVIDIA). The driver is opened at run time, so a machine
+# without one still runs, on the CPU. Building needs the Vulkan headers and glslc.
+gpu = ["whisper-rs/vulkan"]
