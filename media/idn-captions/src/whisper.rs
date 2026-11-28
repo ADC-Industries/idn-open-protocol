@@ -3,7 +3,7 @@
 //! its own. What the engine makes of a pass (the filters, the lines) stays with the
 //! engine.
 
-use crate::{STOPPED, device, device_name};
+use crate::{GpuDevice, STOPPED, device, device_name};
 use std::path::Path;
 use std::sync::Arc;
 use whisper_rs::{
@@ -80,13 +80,16 @@ pub(crate) struct Local {
     state: WhisperState,
     /// What it runs on: the GPU's name, or "CPU (N threads)".
     pub device: String,
+    /// Why it isn't on the GPU asked for (an index or a name not on this machine), to log.
+    pub note: Option<String>,
 }
 
 impl Local {
-    /// Loads the model at `path`, on the best GPU when `gpu` (and there is one).
-    pub fn load(path: &Path, gpu: bool) -> Result<Local, String> {
+    /// Loads the model at `path`, on the GPU `choice` gives when `gpu` (and there is
+    /// one: [`crate::choose_gpu`]), else on the CPU.
+    pub fn load(path: &Path, gpu: bool, choice: &GpuDevice) -> Result<Local, String> {
         whisper_rs::install_logging_hooks();
-        let g = device(gpu);
+        let (g, note) = device(gpu, choice);
         let mut ctx_params = WhisperContextParameters::default();
         ctx_params.use_gpu(g.is_some());
         if let Some(g) = &g {
@@ -99,6 +102,7 @@ impl Local {
             ctx,
             state,
             device: device_name(g.as_ref()),
+            note,
         })
     }
 

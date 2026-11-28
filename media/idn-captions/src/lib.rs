@@ -52,8 +52,25 @@
 //!
 //! **"auto" measures in the worker**, at its priority, under whatever else the machine is
 //! doing at the time ([`auto_choose`]): a busy box picks a smaller model. The choice is kept
-//! in `auto.txt` (English) or `auto-multilingual.txt` in the models folder, keyed on the
-//! device's name (asked of the worker); deleting the file measures again.
+//! in `auto.txt` (English) or `auto-multilingual.txt` in the models folder, with the
+//! device's name (asked of the worker): one device each, so another device measures again
+//! and replaces the choice kept, as deleting the file does.
+//!
+//! # Device: never a built-in GPU by default
+//!
+//! [`EngineConfig::gpu`] allows a GPU at all (off: the CPU); [`EngineConfig::gpu_device`]
+//! says which ([`GpuDevice`]). By default ([`GpuDevice::Auto`]) whisper runs on a card of
+//! its own (the one with the most memory first) if the machine has one, else on the CPU:
+//! never on a GPU built into the processor, which also renders the screens (whisper's
+//! passes there made frames late: about 370 a minute, against about 1 a minute with
+//! whisper on the CPU at [`Priority::Lowest`]). [`GpuDevice::Integrated`] (`any`) allows
+//! any GPU, a built-in one too; a card of its own still comes first.
+//! [`GpuDevice::Index`] and [`GpuDevice::Name`] name one ([`gpus_here`] lists them, as
+//! `idn captions --list-gpus` does; an index is ggml's numbering, not the list's order),
+//! and one not on the machine is logged (once a process) and `Auto`'s choice taken. The
+//! worker chooses with the same function as whisper in this process. The
+//! device's name ([`Engine::device`]) and the key of "auto"'s kept choice follow the
+//! device chosen: on a machine with a built-in GPU alone, "auto" now measures the CPU.
 //!
 //! **On Linux, nice ranks threads only within their cgroup.** Under systemd an embedding
 //! application's unit (or session scope) and the IDN Node's unit (which runs `idn
@@ -66,9 +83,10 @@ mod whisper;
 pub mod worker;
 
 use idn_open_protocol::text::CaptionLine;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use whisper::{Local, PassParams, Segment};
 
@@ -200,8 +218,211 @@ pub struct Gpu {
     pub memory_mb: u64,
 }
 
+/// Which GPU whisper may run on ([`EngineConfig::gpu_device`]), when
+/// [`EngineConfig::gpu`] allows a GPU at all.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum GpuDevice {
+    /// The first card of its own (the one with the most memory first); without one, the
+    /// CPU. Never a GPU built into the processor: it shares the screens' rendering, and
+    /// whisper's passes on it make frames late.
+    #[default]
+    Auto,
+    /// Any GPU, a built-in one too; a card of its own still comes first (the best first:
+    /// a card, then the most memory). As text `integrated` or `any`.
+    Integrated,
+    /// The GPU of this [`Gpu::index`]: ggml's own numbering (whisper's `gpu_device`), not
+    /// its place in [`gpus`]'s list, which is sorted best first (`idn captions
+    /// --list-gpus` shows both). A number of 100 or more no GPU has as its index is
+    /// looked for as a whole run of digits in the GPUs' names before it counts as not
+    /// found (`3060` finds an RTX 3060, `680` a Radeon 680M; `1` never finds "GT1").
+    Index(usize),
+    /// The first GPU (best first) whose name contains this, ignoring case.
+    Name(String),
+}
+
+/// The words [`GpuDevice::parse`] (and the programs taking its text) read as something
+/// other than a name.
+const GPU_WORDS: [&str; 4] = ["auto", "integrated", "any", "cpu"];
+
+/// `s` without its prefix `prefix` (ASCII case ignored).
+fn strip_prefix_ignore_case<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = s.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &s[prefix.len()..])
+}
+
+impl GpuDevice {
+    /// From text: `auto` (or empty), `integrated` or `any`, a number (an index; one no GPU
+    /// has as its index is looked for in names), else a name. `index:N` and `name:TEXT`
+    /// say which one a text is (`name:3060`, `name:auto`: names). `cpu` isn't one of
+    /// these: the programs taking it read it first (as [`EngineConfig::gpu`] off); here it
+    /// is a name.
+    pub fn parse(s: &str) -> GpuDevice {
+        let s = s.trim();
+        if let Some(n) = strip_prefix_ignore_case(s, "index:")
+            && let Ok(n) = n.trim().parse::<usize>()
+        {
+            return GpuDevice::Index(n);
+        }
+        if let Some(name) = strip_prefix_ignore_case(s, "name:") {
+            let name = name.trim();
+            return if name.is_empty() {
+                GpuDevice::Auto
+            } else {
+                GpuDevice::Name(name.to_owned())
+            };
+        }
+        if s.is_empty() || s.eq_ignore_ascii_case("auto") {
+            GpuDevice::Auto
+        } else if s.eq_ignore_ascii_case("integrated") || s.eq_ignore_ascii_case("any") {
+            GpuDevice::Integrated
+        } else if let Ok(n) = s.parse::<usize>() {
+            GpuDevice::Index(n)
+        } else {
+            GpuDevice::Name(s.to_owned())
+        }
+    }
+}
+
+impl std::fmt::Display for GpuDevice {
+    /// As [`GpuDevice::parse`] takes it back: `auto`, `integrated`, the index, or the name
+    /// trimmed (as `name:TEXT` when the name alone would read as a number, one of the words
+    /// `auto`, `integrated`, `any`, `cpu`, or the form `index:`/`name:`; a blank name as
+    /// `auto`, the choice it makes).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GpuDevice::Auto => f.write_str("auto"),
+            GpuDevice::Integrated => f.write_str("integrated"),
+            GpuDevice::Index(n) => write!(f, "{n}"),
+            GpuDevice::Name(s) => {
+                let t = s.trim();
+                if t.is_empty() {
+                    // (A blank name chooses as Auto does.)
+                    f.write_str("auto")
+                } else if t.parse::<usize>().is_ok()
+                    || GPU_WORDS.iter().any(|w| t.eq_ignore_ascii_case(w))
+                    || strip_prefix_ignore_case(t, "index:").is_some()
+                    || strip_prefix_ignore_case(t, "name:").is_some()
+                {
+                    write!(f, "name:{t}")
+                } else {
+                    f.write_str(t)
+                }
+            }
+        }
+    }
+}
+
+/// The smallest [`GpuDevice::Index`] looked for in GPU names when no GPU has it as its
+/// index: model numbers (`680`, `3060`); smaller numbers are indexes only.
+const NUMBER_IN_NAME_MIN: usize = 100;
+
+/// Whether `name` holds `n` as a whole run of digits: "Radeon 680M" holds 680, "RTX 3060"
+/// holds 3060 but not 306 (and "ADL-S GT1" holds 1, which is why only numbers from
+/// [`NUMBER_IN_NAME_MIN`] up are looked for).
+fn name_holds_number(name: &str, n: usize) -> bool {
+    let want = n.to_string();
+    name.split(|c: char| !c.is_ascii_digit())
+        .any(|run| run == want)
+}
+
+/// The GPU whisper runs on among `gpus` for `gpu` ([`EngineConfig::gpu`]) and `choice`
+/// ([`EngineConfig::gpu_device`]); `None` is the CPU. An index of 100 or more no GPU has
+/// is looked for as a whole number in the names (`3060`); an index or a name not among
+/// `gpus` gives [`GpuDevice::Auto`]'s choice, with a line saying so to log.
+pub(crate) fn choose_gpu(
+    gpus: &[Gpu],
+    gpu: bool,
+    choice: &GpuDevice,
+) -> (Option<Gpu>, Option<String>) {
+    if !gpu {
+        return (None, None);
+    }
+    let auto = || {
+        gpus.iter()
+            .filter(|g| g.discrete)
+            .min_by_key(|g| std::cmp::Reverse(g.memory_mb))
+            .cloned()
+    };
+    let named = |want: &str| {
+        let want = want.trim().to_lowercase();
+        gpus.iter()
+            .filter(|g| g.name.to_lowercase().contains(&want))
+            .min_by_key(|g| (!g.discrete, std::cmp::Reverse(g.memory_mb)))
+    };
+    let found = match choice {
+        GpuDevice::Auto => return (auto(), None),
+        GpuDevice::Integrated => {
+            return (
+                gpus.iter()
+                    .min_by_key(|g| (!g.discrete, std::cmp::Reverse(g.memory_mb)))
+                    .cloned(),
+                None,
+            );
+        }
+        // (A number meant as a name, `3060`, when no GPU has it as its index: 100 or more,
+        // and only as a whole run of digits in a name, so `1` never finds "GT1".)
+        GpuDevice::Index(n) => gpus
+            .iter()
+            .find(|g| usize::try_from(g.index).is_ok_and(|i| i == *n))
+            .or_else(|| {
+                if *n < NUMBER_IN_NAME_MIN {
+                    return None;
+                }
+                gpus.iter()
+                    .filter(|g| name_holds_number(&g.name, *n))
+                    .min_by_key(|g| (!g.discrete, std::cmp::Reverse(g.memory_mb)))
+            }),
+        GpuDevice::Name(s) if s.trim().is_empty() => return (auto(), None),
+        GpuDevice::Name(s) => named(s),
+    };
+    if let Some(g) = found {
+        return (Some(g.clone()), None);
+    }
+    let fallback = auto();
+    let here = if gpus.is_empty() {
+        "none".to_owned()
+    } else {
+        gpus.iter()
+            .map(|g| format!("{} {}", g.index, g.name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let what = match choice {
+        GpuDevice::Index(n) if *n >= NUMBER_IN_NAME_MIN => {
+            format!("GPU {n} (as an index or in a name)")
+        }
+        GpuDevice::Index(n) => format!("GPU {n} (as an index)"),
+        _ => format!("GPU {:?}", choice.to_string()),
+    };
+    let note = format!(
+        "captions: no {what} on this machine (its GPUs: {here}); on {} instead",
+        fallback
+            .as_ref()
+            .map_or_else(|| "the CPU".to_owned(), |g| g.name.clone())
+    );
+    (fallback, Some(note))
+}
+
+/// The notes already logged in this process ([`say_once`]).
+static NOTES_SAID: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+/// Logs `note` once a process: a GPU asked for that isn't here is found out by each load,
+/// each device probe and each worker started, with the same words each time.
+pub(crate) fn say_once(note: &str) {
+    let new = NOTES_SAID
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(note.to_owned());
+    if new {
+        idn_open_protocol::log::log(note);
+    }
+}
+
 /// The GPUs on this machine whisper can use, best first: a card of its own, then the most
-/// memory. None without the `gpu` feature or a GPU driver with Vulkan.
+/// memory. None without the `gpu` feature or a GPU driver with Vulkan. Each keeps its
+/// [`Gpu::index`] in ggml's order (the number [`GpuDevice::Index`] and whisper's
+/// `gpu_device` take), so a GPU's place in this list is not its index.
 pub fn gpus() -> Vec<Gpu> {
     use whisper_rs_sys::*;
     // (ggml's messages as it finds its devices to its log hooks, not standard error.)
@@ -238,9 +459,14 @@ pub fn gpus() -> Vec<Gpu> {
     out
 }
 
-/// What whisper runs on ([`EngineConfig::gpu`]): the best GPU, or none (the CPU).
-fn device(gpu: bool) -> Option<Gpu> {
-    gpu.then(|| gpus().into_iter().next()).flatten()
+/// What whisper runs on ([`EngineConfig::gpu`], [`EngineConfig::gpu_device`]): a GPU of
+/// this machine ([`choose_gpu`]), or none (the CPU); with it, a line to log when the GPU
+/// asked for isn't here. GPUs aren't looked for (no GPU driver opened) when `gpu` is off.
+fn device(gpu: bool, choice: &GpuDevice) -> (Option<Gpu>, Option<String>) {
+    if !gpu {
+        return (None, None);
+    }
+    choose_gpu(&gpus(), gpu, choice)
 }
 
 /// Its name in logs and in `auto.txt`.
@@ -301,7 +527,8 @@ pub const KEEPS_UP: Duration = Duration::from_millis(2500);
 
 /// The model "auto" means on this machine, measured on it: the largest of
 /// [`auto_candidates`] whose pass takes [`KEEPS_UP`] or less on the device `cfg` gives
-/// (the best GPU first), downloaded into `dir` as tried. Kept in `dir/auto.txt` (English)
+/// ([`EngineConfig::gpu_device`]: by default a card of its own, else the CPU), downloaded
+/// into `dir` as tried. Kept in `dir/auto.txt` (English)
 /// or `dir/auto-multilingual.txt` (other languages) with the device's name, so it is
 /// measured once per device (deleting the file measures again); `log` hears what happens.
 /// Measured where whisper will run: in the worker at its priority (the device asked of
@@ -771,8 +998,16 @@ pub struct EngineConfig {
     pub longest: Duration,
     /// Below this level (RMS) is quiet.
     pub quiet: f32,
-    /// On the best GPU when there is one (the `gpu` feature); else the CPU.
+    /// A GPU allowed (the `gpu` feature), the one [`EngineConfig::gpu_device`] chooses;
+    /// off: the CPU, whatever `gpu_device` says.
     pub gpu: bool,
+    /// Which GPU, when [`EngineConfig::gpu`] is on: [`GpuDevice::Auto`] by default, a card
+    /// of its own (the most memory first) if the machine has one, else the CPU; never a
+    /// GPU built into the processor, which shares the screens' rendering (whisper there
+    /// made frames late). [`GpuDevice::Integrated`] allows any GPU, a built-in one too
+    /// (a card of its own still comes first); [`GpuDevice::Index`] and [`GpuDevice::Name`]
+    /// name one (not found: logged once a process, and `Auto`'s choice).
+    pub gpu_device: GpuDevice,
     /// Caption sung lines too: whisper over music makes things up, so lines are left
     /// out while [`Music`] hears music, unless this is set.
     pub keep_music: bool,
@@ -803,6 +1038,7 @@ impl Default for EngineConfig {
             longest: Duration::from_secs(10),
             quiet: 0.01,
             gpu: true,
+            gpu_device: GpuDevice::Auto,
             keep_music: false,
             priority: Priority::default(),
             worker: None,
@@ -864,7 +1100,9 @@ static RUNS_HERE_SAID: AtomicBool = AtomicBool::new(false);
 fn open_whisper(path: &Path, cfg: &EngineConfig) -> Result<(Whisper, String, Priority), String> {
     let programs = (cfg.priority != Priority::Normal)
         .then(|| worker::find_programs_here(cfg.worker.as_deref()));
-    open_whisper_with(path, cfg, programs, &mut |p, c| Local::load(p, c.gpu))
+    open_whisper_with(path, cfg, programs, &mut |p, c| {
+        Local::load(p, c.gpu, &c.gpu_device)
+    })
 }
 
 /// [`open_whisper`] with the worker programs found (`None`: normal priority asked) and
@@ -879,7 +1117,14 @@ fn open_whisper_with(
         None => None,
         Some(Err(why)) => Some(why),
         Some(Ok(programs)) => {
-            match worker::Remote::open(&programs, cfg.priority, path, cfg.gpu, cfg.worker_timeout) {
+            match worker::Remote::open(
+                &programs,
+                cfg.priority,
+                path,
+                cfg.gpu,
+                cfg.gpu_device.clone(),
+                cfg.worker_timeout,
+            ) {
                 Ok(r) => {
                     let (device, priority) = (r.device.clone(), r.priority);
                     return Ok((Whisper::Worker(Box::new(r)), device, priority));
@@ -897,6 +1142,9 @@ fn open_whisper_with(
         ));
     }
     let l = local(path, cfg)?;
+    if let Some(note) = &l.note {
+        say_once(note);
+    }
     let device = l.device.clone();
     Ok((Whisper::Local(Box::new(l)), device, Priority::Normal))
 }
@@ -906,13 +1154,39 @@ fn open_whisper_with(
 fn choose_device(cfg: &EngineConfig) -> Result<(Option<Gpu>, String), String> {
     if cfg.priority != Priority::Normal
         && let Ok(programs) = worker::find_programs_here(cfg.worker.as_deref())
-        && let Some(d) = worker::probe_device(&programs, cfg.priority, cfg.gpu, cfg.worker_timeout)?
+        && let Some(d) = worker::probe_device(
+            &programs,
+            cfg.priority,
+            cfg.gpu,
+            &cfg.gpu_device,
+            cfg.worker_timeout.min(worker::PROBE_TIMEOUT),
+        )?
     {
         return Ok(d);
     }
-    let g = device(cfg.gpu);
+    let (g, note) = device(cfg.gpu, &cfg.gpu_device);
+    if let Some(note) = &note {
+        say_once(note);
+    }
     let name = device_name(g.as_ref());
     Ok((g, name))
+}
+
+/// The GPUs whisper can use where it would run with `cfg` ([`gpus`]: best first, each
+/// with its [`Gpu::index`]), asked of the worker when `cfg` wants one and one starts (so
+/// this process opens no GPU driver), else looked for in this process.
+pub fn gpus_here(cfg: &EngineConfig) -> Result<Vec<Gpu>, String> {
+    if cfg.priority != Priority::Normal
+        && let Ok(programs) = worker::find_programs_here(cfg.worker.as_deref())
+        && let Some(list) = worker::probe_gpus(
+            &programs,
+            cfg.priority,
+            cfg.worker_timeout.min(worker::PROBE_TIMEOUT),
+        )?
+    {
+        return Ok(list);
+    }
+    Ok(gpus())
 }
 
 /// Speech to caption lines.
@@ -1331,6 +1605,193 @@ mod tests {
         codes.dedup();
         assert_eq!(codes.len(), LANGUAGES.len());
         assert!(codes.iter().all(|c| c.len() == 2));
+    }
+
+    /// The GPU chosen: by default a card of its own, never a GPU built into the processor
+    /// (the CPU instead); `Integrated` allows one; an index or a name found is taken, one
+    /// not found gives the default's choice with a line saying so; `gpu` off is the CPU.
+    #[test]
+    fn the_gpu_is_chosen_safely() {
+        let gpu = |index: i32, name: &str, discrete: bool, memory_mb: u64| Gpu {
+            index,
+            name: name.into(),
+            discrete,
+            memory_mb,
+        };
+        let igpu = gpu(0, "AMD Radeon 680M (RADV REMBRANDT)", false, 8192);
+        let small = gpu(1, "NVIDIA GeForce GTX 1650", true, 4096);
+        let big = gpu(2, "NVIDIA GeForce RTX 3060", true, 12288);
+        let only_igpu = [igpu.clone()];
+        // (In any order: the best is found, not taken as the first.)
+        let all = [igpu.clone(), small.clone(), big.clone()];
+        fn choose(gpus: &[Gpu], on: bool, d: GpuDevice) -> (Option<Gpu>, Option<String>) {
+            choose_gpu(gpus, on, &d)
+        }
+        assert_eq!(EngineConfig::default().gpu_device, GpuDevice::Auto);
+
+        // Auto: the CPU with a built-in GPU alone; the card with the most memory else.
+        assert_eq!(choose(&only_igpu, true, GpuDevice::Auto), (None, None));
+        assert_eq!(choose(&[], true, GpuDevice::Auto), (None, None));
+        assert_eq!(
+            choose(&all, true, GpuDevice::Auto),
+            (Some(big.clone()), None)
+        );
+        assert_eq!(
+            choose(&[igpu.clone(), small.clone()], true, GpuDevice::Auto),
+            (Some(small.clone()), None)
+        );
+        // Integrated: any GPU, the best first.
+        assert_eq!(
+            choose(&only_igpu, true, GpuDevice::Integrated),
+            (Some(igpu.clone()), None)
+        );
+        assert_eq!(
+            choose(&all, true, GpuDevice::Integrated),
+            (Some(big.clone()), None)
+        );
+        // An index: that one, a built-in one too.
+        assert_eq!(
+            choose(&all, true, GpuDevice::Index(0)),
+            (Some(igpu.clone()), None)
+        );
+        assert_eq!(
+            choose(&all, true, GpuDevice::Index(1)),
+            (Some(small.clone()), None)
+        );
+        // A name: the first whose name contains it, ignoring case.
+        assert_eq!(
+            choose(&all, true, GpuDevice::Name("gtx".into())),
+            (Some(small.clone()), None)
+        );
+        assert_eq!(
+            choose(&all, true, GpuDevice::Name("radeon".into())),
+            (Some(igpu.clone()), None)
+        );
+        // A number no GPU has as its index: looked for in the names (`--gpu 3060`).
+        assert_eq!(
+            choose(&all, true, GpuDevice::Index(3060)),
+            (Some(big.clone()), None)
+        );
+        assert_eq!(
+            choose(&all, true, GpuDevice::Index(1650)),
+            (Some(small.clone()), None)
+        );
+        assert_eq!(
+            choose(&all, true, GpuDevice::Index(680)),
+            (Some(igpu.clone()), None)
+        );
+        // Only a whole run of digits, and only from 100 up: a small number not found as an
+        // index is not looked for in names ("GT1" holds 1; "680M" holds 6 nowhere).
+        let uhd = gpu(0, "Intel(R) UHD Graphics 770 (ADL-S GT1)", false, 8192);
+        let (g, note) = choose(std::slice::from_ref(&uhd), true, GpuDevice::Index(1));
+        assert_eq!(g, None, "the CPU, not the built-in GPU");
+        assert!(note.is_some());
+        for n in [6, 7] {
+            let (g, note) = choose(&all, true, GpuDevice::Index(n));
+            assert_eq!(g, Some(big.clone()), "Index({n})");
+            assert!(note.is_some(), "Index({n})");
+        }
+        assert_eq!(
+            choose(&all, true, GpuDevice::Index(306)).0,
+            Some(big.clone()),
+            "306 is not in \"RTX 3060\": Auto's choice"
+        );
+        assert!(choose(&all, true, GpuDevice::Index(306)).1.is_some());
+        assert!(name_holds_number("AMD Radeon 680M (RADV REMBRANDT)", 680));
+        assert!(name_holds_number("NVIDIA GeForce RTX 3060", 3060));
+        assert!(!name_holds_number("NVIDIA GeForce RTX 3060", 306));
+        assert!(!name_holds_number("AMD Radeon 680M", 68));
+        // (An index found is the index, though a name holds the number too.)
+        let numbered = [gpu(2, "Card 1", true, 1024), gpu(1, "Card 2", true, 2048)];
+        assert_eq!(
+            choose(&numbered, true, GpuDevice::Index(1)),
+            (Some(numbered[1].clone()), None)
+        );
+        assert_eq!(
+            choose(&numbered, true, GpuDevice::Name("1".into())),
+            (Some(numbered[0].clone()), None)
+        );
+        // Not found: the default's choice, and a line saying so.
+        let (g, note) = choose(&all, true, GpuDevice::Index(7));
+        assert_eq!(g, Some(big.clone()));
+        let note = note.unwrap();
+        assert!(
+            note.contains("GPU 7") && note.contains("RTX 3060"),
+            "{note}"
+        );
+        let (g, note) = choose(&only_igpu, true, GpuDevice::Name("Arc A380".into()));
+        assert_eq!(g, None, "the CPU, not the built-in GPU");
+        assert!(note.unwrap().contains("the CPU"));
+        // An empty name is the default, said nowhere.
+        assert_eq!(
+            choose(&all, true, GpuDevice::Name(" ".into())),
+            (Some(big.clone()), None)
+        );
+        // gpu off: the CPU, whatever the choice.
+        for d in [
+            GpuDevice::Auto,
+            GpuDevice::Integrated,
+            GpuDevice::Index(2),
+            GpuDevice::Name("rtx".into()),
+        ] {
+            assert_eq!(choose(&all, false, d), (None, None));
+        }
+        // The text form, both ways.
+        for (text, d) in [
+            ("auto", GpuDevice::Auto),
+            ("", GpuDevice::Auto),
+            (" Integrated ", GpuDevice::Integrated),
+            ("any", GpuDevice::Integrated),
+            ("ANY", GpuDevice::Integrated),
+            ("1", GpuDevice::Index(1)),
+            ("3060", GpuDevice::Index(3060)),
+            ("index:2", GpuDevice::Index(2)),
+            ("Index: 2", GpuDevice::Index(2)),
+            ("RTX", GpuDevice::Name("RTX".into())),
+            ("name:RTX 3060", GpuDevice::Name("RTX 3060".into())),
+            // Numeric names and names that are keywords, said as names.
+            ("name:3060", GpuDevice::Name("3060".into())),
+            ("NAME:1650", GpuDevice::Name("1650".into())),
+            ("name:auto", GpuDevice::Name("auto".into())),
+            ("name:Integrated", GpuDevice::Name("Integrated".into())),
+            ("name:any", GpuDevice::Name("any".into())),
+            ("name:cpu", GpuDevice::Name("cpu".into())),
+            ("name:index:1", GpuDevice::Name("index:1".into())),
+            ("name:", GpuDevice::Auto),
+            // (`index:` without a number is a name.)
+            ("index:x", GpuDevice::Name("index:x".into())),
+            // (`cpu` is read before this, by the programs; here it is a name.)
+            ("cpu", GpuDevice::Name("cpu".into())),
+        ] {
+            assert_eq!(GpuDevice::parse(text), d, "{text:?}");
+            assert_eq!(GpuDevice::parse(&d.to_string()), d, "{d:?} as {d}");
+        }
+        // Plain where plain reads back the same; `name:` where it wouldn't.
+        assert_eq!(GpuDevice::Name("RTX 3060".into()).to_string(), "RTX 3060");
+        assert_eq!(GpuDevice::Name("3060".into()).to_string(), "name:3060");
+        assert_eq!(GpuDevice::Name("Auto".into()).to_string(), "name:Auto");
+        assert_eq!(GpuDevice::Name("cpu".into()).to_string(), "name:cpu");
+        assert_eq!(GpuDevice::Index(3).to_string(), "3");
+        assert_eq!(GpuDevice::Integrated.to_string(), "integrated");
+        // Names print trimmed; a blank one prints as `auto`, and reads back as the choice
+        // it makes.
+        assert_eq!(
+            GpuDevice::Name("  RTX 3060 ".into()).to_string(),
+            "RTX 3060"
+        );
+        assert_eq!(GpuDevice::Name(" 3060 ".into()).to_string(), "name:3060");
+        assert_eq!(GpuDevice::Name(" auto ".into()).to_string(), "name:auto");
+        assert_eq!(GpuDevice::Name(String::new()).to_string(), "auto");
+        assert_eq!(GpuDevice::Name("   ".into()).to_string(), "auto");
+        for (name, back) in [
+            ("  RTX 3060 ", GpuDevice::Name("RTX 3060".into())),
+            (" 3060 ", GpuDevice::Name("3060".into())),
+            ("", GpuDevice::Auto),
+            ("   ", GpuDevice::Auto),
+        ] {
+            let d = GpuDevice::Name(name.into());
+            assert_eq!(GpuDevice::parse(&d.to_string()), back, "{d:?} as {d}");
+        }
     }
 
     /// whisper runs in this process only when normal priority is asked for, no worker

@@ -214,6 +214,63 @@ fn captions_run_with_a_source() {
     c.set("model", "auto").unwrap();
     assert!(c.model.is_none());
     assert!(c.set("model", "gpt").is_err() && c.set("name", "A (B)").is_err());
+    // Where whisper runs: auto by default (nothing passed), the CPU as --cpu, anything
+    // else as --gpu.
+    assert!(c.gpu.is_none());
+    let no_gpu = |c: &CaptionsSetting| {
+        let cmd = c.command().unwrap();
+        !cmd.iter().any(|a| a == "--gpu" || a == "--cpu")
+    };
+    assert!(no_gpu(&c));
+    c.set("gpu", "CPU").unwrap();
+    assert_eq!(c.gpu.as_deref(), Some("cpu"));
+    assert_eq!(CaptionsSetting::from_element(&c.to_element()), c);
+    assert_eq!(
+        c.command().unwrap().last().map(String::as_str),
+        Some("--cpu")
+    );
+    for (v, arg) in [
+        ("integrated", "integrated"),
+        ("Integrated", "integrated"),
+        ("1", "1"),
+        ("RTX 3060", "RTX 3060"),
+    ] {
+        c.set("gpu", v).unwrap();
+        assert_eq!(CaptionsSetting::from_element(&c.to_element()), c);
+        let cmd = c.command().unwrap();
+        assert!(cmd.windows(2).any(|w| w == ["--gpu", arg]), "{v}: {cmd:?}");
+    }
+    assert!(c.set("gpu", "--cpu").is_err() && c.set("gpu", "a \"b\"").is_err());
+    // `any` kept as `integrated`; the explicit forms passed as they are.
+    c.set("gpu", "Any").unwrap();
+    assert_eq!(c.gpu.as_deref(), Some("integrated"));
+    c.set("gpu", "name:3060").unwrap();
+    assert!(
+        c.command()
+            .unwrap()
+            .windows(2)
+            .any(|w| w == ["--gpu", "name:3060"])
+    );
+    // No control characters (a tab, an escape, NUL, a line break inside).
+    for bad in [
+        "RTX\t3060",
+        "RTX\u{1b}[0m",
+        "a\0b",
+        "RTX\n3060",
+        "RTX\u{85}3060",
+    ] {
+        assert!(c.set("gpu", bad).is_err(), "{bad:?}");
+    }
+    assert_eq!(
+        c.gpu.as_deref(),
+        Some("name:3060"),
+        "a refused value changes nothing"
+    );
+    c.set("gpu", "auto").unwrap();
+    assert!(c.gpu.is_none() && no_gpu(&c));
+    c.set("gpu", "integrated").unwrap();
+    c.set("gpu", "").unwrap();
+    assert!(c.gpu.is_none(), "empty: auto");
     let status = Element::new("status").with_child(c.to_element());
     assert!(services_of(&status).iter().any(|s| s.id == "captions"));
 }

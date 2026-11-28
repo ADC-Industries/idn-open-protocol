@@ -386,6 +386,38 @@ async fn handsets_need_https() {
     assert_eq!(st, 200);
 }
 
+/// Provisioning with `url` (VOICE-CLIENT.md §10): the address given comes first in `urls`;
+/// without it, the address the request came by. A `url` that can't be one is ignored.
+#[tokio::test(flavor = "multi_thread")]
+async fn provisioning_puts_the_url_given_first() {
+    let (addr, _v, _told) = server().await;
+    let ann = login(addr, "ann").await;
+    let ask = |body: Value| {
+        let ann = ann.clone();
+        async move {
+            let (st, r) = call(
+                addr,
+                "POST",
+                "/voice/api/handsets",
+                &[("Cookie", &ann)],
+                &body,
+            )
+            .await;
+            assert_eq!(st, 200, "{r}");
+            r
+        }
+    };
+    let r = ask(json!({"name": "Truck 30", "issue": "credential",
+        "url": "https://voice.example.org:29203/voice/"}))
+    .await;
+    assert_eq!(r["urls"][0], "https://voice.example.org:29203/voice", "{r}");
+    let r = ask(json!({"name": "Truck 31", "issue": "credential"})).await;
+    let first = r["urls"][0].as_str().unwrap().to_owned();
+    assert!(first.contains(&addr.port().to_string()), "{r}");
+    let r = ask(json!({"name": "Truck 32", "issue": "credential", "url": "not an address"})).await;
+    assert_eq!(r["urls"][0].as_str().unwrap(), first, "{r}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_handset_signs_in_with_its_credential_is_never_admin_and_revoking_ends_it() {
     let (addr, _v, told) = server().await;

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::io::{self, Read, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -97,6 +97,10 @@ fn line(path: &Path) -> Option<String> {
 /// Driver `name` listed in `dir` (cwASIO's `registerDriver`): its folder (mode 0775) and
 /// its `driver` file (0664) naming `library`, and a `description` if given.
 ///
+/// The folder's mode is set only when this call creates it: a folder already there (made
+/// by another user, or its mode set by an administrator, or a link to a folder) is used as
+/// it is, so registering again works for a user who can write its files but doesn't own it.
+///
 /// Errors as cwASIO's: `EINVAL` for a name that can't be a folder of the list, `EEXIST`
 /// when `name` is listed for another library; else what the file system says.
 pub fn register(
@@ -125,7 +129,25 @@ pub fn register(
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o775)
-        .create(&sub)?;
+        .create(dir)?;
+    // Made here, or already there (a folder, or a link to one, used as it is, never
+    // changed): the answer of the one mkdir says which, with no look before it to race.
+    let created = match std::fs::DirBuilder::new().mode(0o775).create(&sub) {
+        Ok(()) => true,
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(e) => return Err(e),
+    };
+    // The mode as cwASIO's registerDriver sets it, whatever the umask (022 made it 0755),
+    // on a folder this call made, through a descriptor that is that folder (a link put in
+    // its place meanwhile is refused, not followed); best effort (the folder is there
+    // either way).
+    if created {
+        let _ = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(&sub)
+            .and_then(|f| f.set_permissions(std::fs::Permissions::from_mode(0o775)));
+    }
     // (No newline: the whole file is the line, whatever the reader.)
     write_file(&file, lib)?;
     if let Some(d) = description {
@@ -184,11 +206,33 @@ pub fn same_library(a: &Path, b: &Path) -> bool {
 
 /// `bytes` as the whole of `path`, swapped in whole (a new file renamed over it: a host
 /// reading the list meanwhile never finds it empty or cut, a link there is replaced, not
-/// its target written). Nothing written when it holds that already.
+/// its target written), mode 0664. Nothing written when it holds that already; then a
+/// file of this user's whose mode isn't 0664 gets it, best effort.
 fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    if std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file())
+    if let Ok(m) = std::fs::symlink_metadata(path)
+        && m.is_file()
         && std::fs::read(path).is_ok_and(|b| b == bytes)
     {
+        // SAFETY: geteuid has no preconditions and can't fail.
+        let me = unsafe { libc::geteuid() };
+        if m.uid() == me && (m.mode() & 0o777) != 0o664 {
+            // (Through a descriptor: opened without following a link, without blocking on
+            // a FIFO and without taking a terminal, then changed only when it is a regular
+            // file of this user's and the same file looked at above, so nothing put in its
+            // place meanwhile is changed.)
+            if let Ok(f) = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_NOCTTY)
+                .open(path)
+                && let Ok(now) = f.metadata()
+                && now.is_file()
+                && now.dev() == m.dev()
+                && now.ino() == m.ino()
+                && now.uid() == me
+            {
+                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o664));
+            }
+        }
         return Ok(());
     }
     let mut tmp = path.as_os_str().to_owned();
@@ -201,6 +245,7 @@ fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
             .create_new(true)
             .mode(0o664)
             .open(&tmp)?;
+        f.set_permissions(std::fs::Permissions::from_mode(0o664))?;
         f.write_all(bytes)?;
         f.sync_all()?;
         std::fs::rename(&tmp, path)
@@ -395,6 +440,22 @@ mod tests {
             }
         );
         assert_eq!(all[0].description, "IDN");
+        // The modes cwASIO gives them, whatever the umask.
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&d.join("IDN")), 0o775);
+        assert_eq!(mode(&d.join("IDN").join("driver")), 0o664);
+        assert_eq!(mode(&d.join("IDN").join("description")), 0o664);
+        // A folder already there keeps its mode (an administrator's, or one made under
+        // another umask), and registering again into it works; its files, ours, get 0664.
+        std::fs::set_permissions(d.join("IDN"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(
+            d.join("IDN").join("driver"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        register(&d, "IDN", lib, Some("IDN")).unwrap();
+        assert_eq!(mode(&d.join("IDN")), 0o755);
+        assert_eq!(mode(&d.join("IDN").join("driver")), 0o664);
         // Again for the same library: fine; for another: taken.
         register(&d, "IDN", lib, None).unwrap();
         assert_eq!(errno(register(&d, "IDN", other, None)), Some(libc::EEXIST));

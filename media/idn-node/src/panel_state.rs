@@ -197,6 +197,10 @@ pub struct CaptionsService {
     /// The language spoken (whisper's code; empty: English).
     #[serde(default)]
     pub lang: String,
+    /// Where whisper runs (empty: auto, a graphics card of its own, else the CPU; `cpu`,
+    /// `integrated`, a GPU's number or its name).
+    #[serde(default)]
+    pub gpu: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]

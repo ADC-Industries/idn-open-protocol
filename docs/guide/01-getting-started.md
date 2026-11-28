@@ -183,10 +183,12 @@ IDN Node opens itself for computers for its first half hour.
 Install the package (it brings what it needs from the distribution):
 
 ```
-sudo apt install ./idn-media_0.2.0~alpha25_amd64.deb
+sudo apt install ./idn-media_0.3.8.beta22_amd64.deb
 ```
 
-(the file's name has the version you downloaded). It installs the IDN Node as a service,
+(the name of the file you downloaded; release downloads have a dot where the package's
+version has ~). Keep the `./`: it tells apt the name is a file, not a package to look up.
+It installs the IDN Node as a service,
 started at once and at every boot, and adds you to the `idn` group: log out and in again.
 The applications menu then has **IDN Node** and **IDN Guide**, and the session agent
 (idn-session) starts at every log-in. The `idn` command and the other programs are on the
@@ -195,14 +197,16 @@ path. FFmpeg 8.1 comes with the package.
 `idn-node open` (or IDN Node in the menu) opens the control panel, with the first-run
 setup.
 
-Updating: install the newer package the same way; the machine keeps its site identity.
+Updating: install the newer file the same way, with its own name; the machine keeps its
+site identity.
 Removing: `sudo apt remove idn-media` stops and removes the service and keeps the
 machine's identity; `sudo apt purge idn-media` removes that too (the media folder,
 `/var/lib/idn-media`, stays).
 
 The Industrial edition's Node is its own package: `sudo apt install
-./idn-industrial_0.2.0~alpha25_amd64.deb`, then `sudo idn-industrial enrol IDNI1-…` with
-the token from the Site Manager | Industrial.
+./idn-industrial_0.3.8.beta22_amd64.deb` (again the name of the file you downloaded),
+then `sudo idn-industrial enrol IDNI1-…` with the token from the Site Manager |
+Industrial.
 
 ## Opening the IDN Node panel
 

@@ -23,7 +23,7 @@ clean-room, from public documentation and black-box testing, without vendor code
 
   See [docs/INTEGRATION.md](docs/INTEGRATION.md) for the guide, and
   [CHANGELOG.md](CHANGELOG.md) for versioning and what to depend on — pin the tagged
-  release **`v0.3.8-Beta21`** (a pre-release), not `main`. For the API reference, run
+  release **`v0.3.8-Beta22`** (a pre-release), not `main`. For the API reference, run
   `scripts/build-docs.sh` and open `docs/api/index.html` (static HTML, works offline);
   if you depend on the crate, `cargo doc -p idn-open-protocol` from your own workspace
   builds the same reference, so you don't need this repo's script.

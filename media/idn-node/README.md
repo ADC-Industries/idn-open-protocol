@@ -189,11 +189,16 @@ revoke machines and change their settings and the site's options.
 The Site Manager's functions below are the embedding application's pages (through the
 Site Manager's API).
 
-**Every setting, copies, templates**: each machine's *All settings* is one form of
-everything it runs (sound bridges, screens, the site link, AES67, listening on phones,
-services, video, clock, simple mode); *Copy settings to…* sends the groups you choose to
-one or many machines; *Templates* keeps named sets of settings for the site, to apply to
-machines whenever you like. The site options stay as they are.
+**Every setting, copies, templates**: the Media Site Manager has no UI of its own; its
+API gives an application each machine's settings as one form of everything it runs
+(sound bridges, screens, the site link, AES67, listening on phones, captions, services,
+video, clock, simple mode: `GET /api/v1/settings_schema`, `GET
+/api/v1/machine_settings?fingerprint=…`, `POST /api/v1/apply {to, settings}`).
+`POST /api/v1/copy_settings {from, to, groups?}` sends the groups chosen to one or many
+machines; `POST /api/v1/template {name, settings}` keeps named sets of settings for the
+site, and `POST /api/v1/apply_template {name, to}` applies one to machines whenever you
+like (a machine's own keys, `captions.gpu` among them, are never copied nor kept in a
+template; docs/MEDIA-API.md). The site options stay as they are.
 
 **Updates**: upload a release from ADC Industries (`.idnrelease`) to the Site Manager
 (from the embedding application) and update machines now or at their next restart — one machine first, the

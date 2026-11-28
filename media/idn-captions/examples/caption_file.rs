@@ -1,8 +1,10 @@
 //! Captions a WAV file (16-bit PCM) as the program would hear it live, a second at a
-//! time: `caption_file MODEL MODELS_DIR FILE.wav [cpu]` (the model downloaded if missing;
-//! on the best GPU unless `cpu`).
+//! time: `caption_file MODEL MODELS_DIR FILE.wav [cpu|auto|any|N|NAME]` (the model
+//! downloaded if missing; on the GPU the choice gives, `auto` by default: a card of its
+//! own, else the CPU; `any` (or `integrated`) for any GPU, a built-in one too, a card
+//! still first; `cpu`, any case, on the CPU).
 
-use idn_captions::{Engine, EngineConfig, ensure_model};
+use idn_captions::{Engine, EngineConfig, GpuDevice, ensure_model};
 use std::time::Instant;
 
 fn main() {
@@ -32,7 +34,10 @@ fn main() {
         .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
         .collect();
     let cfg = EngineConfig {
-        gpu: a.get(4).is_none_or(|x| x != "cpu"),
+        gpu: a
+            .get(4)
+            .is_none_or(|x| !x.trim().eq_ignore_ascii_case("cpu")),
+        gpu_device: GpuDevice::parse(a.get(4).map_or("auto", String::as_str)),
         ..Default::default()
     };
     let mut e = Engine::new(&path, cfg).unwrap();

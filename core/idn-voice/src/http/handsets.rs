@@ -80,6 +80,16 @@ struct CodeBody {
 }
 
 /// A new enrolment code's answer: the code, its link and QR code.
+/// A request's `url` (an address of this server to put in the answer), if it can be one.
+fn wanted_url(want: Option<String>) -> Option<String> {
+    want.map(|u| u.trim().trim_end_matches('/').to_owned())
+        .filter(|u| {
+            (u.starts_with("https://") || u.starts_with("http://"))
+                && u.len() <= 300
+                && !u.chars().any(|c| c.is_whitespace() || c == '?' || c == '#')
+        })
+}
+
 fn code_answer(
     v: &Voice,
     headers: &HeaderMap,
@@ -88,13 +98,7 @@ fn code_answer(
     h: &crate::model::Handset,
     code: &str,
 ) -> Response {
-    let base = want
-        .map(|u| u.trim().trim_end_matches('/').to_owned())
-        .filter(|u| {
-            (u.starts_with("https://") || u.starts_with("http://"))
-                && u.len() <= 300
-                && !u.chars().any(|c| c.is_whitespace() || c == '?' || c == '#')
-        })
+    let base = wanted_url(want)
         .or_else(|| v.cfg.urls.first().cloned())
         .or_else(|| reached_as(v, headers, tls));
     let Some(base) = base else {
@@ -121,14 +125,17 @@ fn code_answer(
     .into_response()
 }
 
+/// `want`: a request's `url` (§10), first in `urls` (and so first for the link) when it
+/// can be an address; else the one the request came by, then the configured ones.
 fn credential_answer(
     v: &Voice,
     headers: &HeaderMap,
     tls: bool,
+    want: Option<String>,
     h: &crate::model::Handset,
     credential: &str,
 ) -> Response {
-    let urls = urls(v, reached_as(v, headers, tls));
+    let urls = urls(v, wanted_url(want).or_else(|| reached_as(v, headers, tls)));
     // Voice over IDN's link (§V.14): each address's host at its UDP port, the one it came
     // by first; none where it isn't offered.
     let offer = v.hub.link_offer();
@@ -189,7 +196,7 @@ async fn enrol(
                 "voice.handset.enrol",
                 json!({"handset": h.id, "name": h.name, "device": h.device, "address": ip.to_string()}),
             );
-            credential_answer(&v, &headers, tls.is_some(), &h, &cred)
+            credential_answer(&v, &headers, tls.is_some(), None, &h, &cred)
         }
         Err(e) => (StatusCode::FORBIDDEN, Json(json!({"error": e}))).into_response(),
     }
@@ -247,7 +254,7 @@ async fn add(
     );
     if credential {
         match v.hub.handset_issue(&h.id) {
-            Ok((h, cred)) => credential_answer(&v, &headers, tls.is_some(), &h, &cred),
+            Ok((h, cred)) => credential_answer(&v, &headers, tls.is_some(), b.url, &h, &cred),
             Err(e) => bad(e),
         }
     } else {
@@ -319,7 +326,7 @@ async fn new_credential(
                 "voice.handset.credential",
                 json!({"handset": h.id, "name": h.name}),
             );
-            credential_answer(&v, &headers, tls.is_some(), &h, &cred)
+            credential_answer(&v, &headers, tls.is_some(), None, &h, &cred)
         }
         Err(e) => not_found(e),
     }

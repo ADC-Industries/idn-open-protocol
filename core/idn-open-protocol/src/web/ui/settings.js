@@ -11,7 +11,9 @@
 // A group: {title, adv, note, pill(s) → [text, tone] | null, when(s), rows: [row]}.
 // A row: {id, label, hint, adv, restart: 'what restarts', when(s), wide, type, …}:
 //   text / number / password / select / switch / area: get(s) → value, put(body, value);
-//     text and number: ph; select: options [[value, label]] or options(s); area: rows, ph;
+//     text and number: ph; select: options [[value, label]] or options(s), missing(v) →
+//     the label of a value set that no option has (kept, so a save doesn't change it);
+//     area: rows, ph;
 //     password: isSet(s) → bool (the field stays empty: typing replaces it), clearable;
 //     switch with `now: (value, ctx) => Promise` acts at once instead of waiting.
 //   fact: show(s) → text | Node;  pill: show(s) → [text, tone] (ok, warn, bad, off).
@@ -77,18 +79,39 @@ const IdnSettings = (() => {
         const sel = mk('select', 'in');
         sel.id = id;
         sel.addEventListener('change', onEdit);
+        // A value set that isn't offered (set elsewhere, or no longer here) stays, marked:
+        // `missing(v)` gives its label.
+        const missingLabel = (v) => (row.missing ? row.missing(v) : v + ' (not available here)');
+        // The last status filled from (a write rebuilds the list against it).
+        let lastS;
+        let filled = false;
         const fill = (s) => {
+          lastS = s;
+          filled = true;
           const v = sel.value;
           let opts = optionsOf(row, s);
-          // A value set that isn't offered now stays, marked.
-          if (v && !opts.some((o) => o[0] === v)) opts = [...opts, [v, (row.missing ? row.missing(v) : v + ' (not available here)')]];
+          if (v && !opts.some((o) => o[0] === v)) opts = [...opts, [v, missingLabel(v)]];
           const key = JSON.stringify(opts);
           if (sel.dataset.opts === key) return;
           sel.replaceChildren(...opts.map(([val, label]) => { const o = mk('option', null, label); o.value = val; return o; }));
           sel.dataset.opts = key;
           sel.value = v;
         };
-        return { el: sel, id, fill, read: () => sel.value, write: (v) => { sel.value = v == null ? '' : String(v); }, focusEl: sel };
+        // (A value written that no option has is added first: set without one, the select
+        // would show nothing and read as empty, and the next save would clear the setting.
+        // The list is then rebuilt against the last status for the value now set, so an
+        // option kept for the value before, no longer set, doesn't linger.)
+        const write = (v) => {
+          const val = v == null ? '' : String(v);
+          if (val && ![...sel.options].some((o) => o.value === val)) {
+            const o = mk('option', null, missingLabel(val));
+            o.value = val;
+            sel.append(o);
+          }
+          sel.value = val;
+          if (filled) fill(lastS);
+        };
+        return { el: sel, id, fill, read: () => sel.value, write, focusEl: sel };
       }
       case 'switch': {
         const b = switchButton(row.label);

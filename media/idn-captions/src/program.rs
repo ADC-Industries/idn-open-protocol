@@ -4,9 +4,14 @@
 //! captions` is the same.
 //!
 //!   idn-captions SOURCE [--name NAME] [--model auto|NAME] [--words TEXT] [--lang en]
-//!                [--channels 1,2] [--models-dir DIR] [--cpu] [--keep-music] [--no-node]
+//!                [--channels 1,2] [--models-dir DIR] [--gpu auto|any|N|NAME]
+//!                [--cpu] [--keep-music] [--no-node]
+//!   idn-captions --list-gpus
 
-use crate::{Engine, EngineConfig, MODEL_LIST, auto_choose_stop, ensure_model_stop, model_speaks};
+use crate::{
+    Engine, EngineConfig, GpuDevice, MODEL_LIST, auto_choose_stop, choose_gpu, ensure_model_stop,
+    gpus_here, model_speaks,
+};
 use idn_common::sync::LockOk as _;
 use idn_open_protocol::api::{Publisher, PublisherConfig};
 use idn_open_protocol::input::{Input, InputConfig, InputEvent};
@@ -18,14 +23,24 @@ use std::time::{Duration, Instant};
 
 const USAGE: &str = "\
 usage: idn-captions SOURCE [--name NAME] [--model auto|NAME] [--words TEXT] [--lang en]
-                    [--channels 1,2] [--models-dir DIR] [--cpu] [--keep-music] [--no-node]
+                    [--channels 1,2] [--models-dir DIR] [--gpu auto|any|N|NAME]
+                    [--cpu] [--keep-music] [--no-node]
+       idn-captions --list-gpus
 
   Live captions on this machine: the IDN source SOURCE's sound (its first two channels
   mixed, or --channels, or SOURCE|ch=N for N and N+1) turned into text by whisper.cpp
   and sent as caption lines on the text-only source NAME (default \"Captions\"): a
-  draft about every second, final at a pause. On the machine's best GPU (Vulkan) when it
-  has one, else the CPU (or --cpu). While music plays (told by its few pauses) lines are
-  left out, whisper making things up over it; --keep-music captions sung lines too.
+  draft about every second, final at a pause. --gpu: auto (the default: a graphics card
+  of its own, Vulkan, else the CPU; never a GPU built into the processor, which renders
+  the screens), any (or integrated: any GPU, a built-in one too; a card still comes
+  first), N (the GPU of index N, as --list-gpus shows it; a number of 100 or more no
+  GPU has as its index is looked for as a whole number in the names, so 3060 finds an
+  RTX 3060) or NAME (the first whose name contains it); index:N and name:TEXT say which
+  is meant. One not found is logged and auto used. --cpu (or --gpu cpu): the CPU
+  whatever --gpu says. --list-gpus: the GPUs whisper can use here (each one's index,
+  name, kind and memory, best first, and the one auto takes), then ends. While music
+  plays (told by its few pauses) lines are left out, whisper making things up over it;
+  --keep-music captions sung lines too.
   --model: auto (the largest that keeps up, measured on this machine the first time),
   tiny.en, base.en, small.en, medium.en (English only), tiny, base, small, medium or
   large-v3-turbo (every language), downloaded the first time from
@@ -49,6 +64,40 @@ fn or_end<T>(r: Result<T, String>, stop: &AtomicBool) -> T {
             std::process::exit(0)
         }
         Err(e) => fail(&e),
+    }
+}
+
+/// `--list-gpus`: the GPUs whisper can use where it would run with `cfg` (asked of the
+/// worker when one starts, so this process opens no GPU driver), best first, each with
+/// the index `--gpu N` takes; the one `--gpu auto` takes marked.
+fn print_gpus(cfg: &EngineConfig) {
+    let list = gpus_here(cfg).unwrap_or_else(|e| fail(&e));
+    if list.is_empty() {
+        println!("No GPU whisper can use here: captions run on the CPU.");
+        return;
+    }
+    let (auto, _) = choose_gpu(&list, true, &GpuDevice::Auto);
+    println!("GPUs whisper can use here, best first (--gpu takes the index or part of the name):");
+    for g in &list {
+        println!(
+            "  {:>2}  {}  ({}, {} MB){}",
+            g.index,
+            g.name,
+            if g.discrete {
+                "a card of its own"
+            } else {
+                "built into the processor"
+            },
+            g.memory_mb,
+            if auto.as_ref() == Some(g) {
+                "  <- auto"
+            } else {
+                ""
+            }
+        );
+    }
+    if auto.is_none() {
+        println!("auto: the CPU (no card of its own; --gpu any takes the built-in GPU).");
     }
 }
 
@@ -87,8 +136,9 @@ pub fn main() {
         (None::<String>, "Captions".to_owned(), "auto".to_owned());
     let (mut words, mut lang, mut dir, mut use_node, mut gpu) =
         (String::new(), "en".to_owned(), None::<PathBuf>, true, true);
+    let mut gpu_device = GpuDevice::Auto;
     let mut channels: Vec<u16> = vec![0, 1];
-    let (mut channels_given, mut keep_music) = (false, false);
+    let (mut channels_given, mut keep_music, mut list_gpus) = (false, false, false);
     // (Bad or missing values print the usage and stop; `--version` answers.)
     let mut it = idn_open_protocol::cli::Args::new(USAGE);
     while let Some(a) = it.next() {
@@ -100,7 +150,16 @@ pub fn main() {
             "--models-dir" => dir = Some(it.value::<String>(&a).into()),
             "--no-node" => use_node = false,
             "--cpu" => gpu = false,
+            "--gpu" => {
+                let v = it.value::<String>(&a);
+                if v.trim().eq_ignore_ascii_case("cpu") {
+                    gpu = false;
+                } else {
+                    gpu_device = GpuDevice::parse(&v);
+                }
+            }
             "--keep-music" => keep_music = true,
+            "--list-gpus" => list_gpus = true,
             "--channels" => {
                 channels_given = true;
                 // Each a channel from 1 to 256 (what a sound flow carries): one that isn't
@@ -123,6 +182,10 @@ pub fn main() {
             s if source.is_none() && !s.starts_with('-') => source = Some(s.to_owned()),
             other => fail(&format!("unknown argument {other:?}\n{USAGE}")),
         }
+    }
+    if list_gpus {
+        print_gpus(&EngineConfig::default());
+        return;
     }
     let mut source = source.unwrap_or_else(|| fail(USAGE));
     // `SOURCE|ch=N` (as the Node's setting takes it): channels N and N+1.
@@ -148,6 +211,7 @@ pub fn main() {
             .collect::<Vec<_>>()
             .join(", "),
         gpu,
+        gpu_device,
         keep_music,
         ..Default::default()
     };

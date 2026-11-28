@@ -15,7 +15,7 @@ software, verified against NDI 6.3 in a lab. NDI® is a registered trademark of 
 AB; this project is not affiliated with or endorsed by Vizrt.
 
 **Versioning — what to depend on.** Pin a tagged release, not `main`: the current one is
-**`v0.3.8-Beta21`** (a pre-release; its release page has the Windows installers and the
+**`v0.3.8-Beta22`** (a pre-release; its release page has the Windows installers and the
 Linux packages, and the README says how to build from source). Tags don't move; `main` does, and may break at any commit between releases. [../CHANGELOG.md](../CHANGELOG.md) lists breaking changes and the rules the API
 follows: types you only read (`OutputStats`, `TappedFrame`, the `SendError` enum) are
 `#[non_exhaustive]` — match them with a trailing `..` — and config structs are built from

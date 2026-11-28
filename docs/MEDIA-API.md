@@ -747,16 +747,19 @@ What a UI needs worked out, served (the page's logic once):
   Answer `{did: path, body}` or `{did: "nothing", why}`. Not clickable: unmatched columns,
   a machine's own device's outputs to IDN, network cells on a read-only site.
 - `GET settings_schema`: `{groups: [{id, title, hint, fields: [{key, type
-  (check|text|lines|select|number|password), label, placeholder, options, min, max,
-  machine_own}]}], machine_own, copy_default}`; `GET machine_settings?fingerprint` → the
-  machine's values, `{key: text}` (never the PIN).
+  (check|text|lines|select|number|password), label, placeholder, options, other, min,
+  max, machine_own}]}], machine_own, copy_default}`; `GET machine_settings?fingerprint` →
+  the machine's values, `{key: text}` (never the PIN). `other: true` (only on a select
+  that has it, today `captions.gpu`): values outside `options` are valid (a GPU's number
+  or name); a UI shows such a value as an extra choice and keeps it, never clearing it or
+  replacing it with the first option.
 - `POST copy_settings {from, to, groups?, pin?}` and `apply_template {name, to}` (admin):
   a machine's own keys (`clock_protocol`, `netaudio.device`, `netaudio.interface`,
-  `audio_rate`, `sitelink.mode`, `data.library`, `capture.screens`, `update.managed_by`) never copied nor kept
-  in a template. A copy never carries the source machine's PIN (`pin`, with the panel
-  group, sets theirs); `apply_template` sends the template's saved PIN (`panel_pin`, a
-  hash), if it has one. `template` keeps the saved PIN when a save of the Simple mode
-  group gives none. In `apply`, `template` and `node`, a PIN of `none` (any case) is no
+  `audio_rate`, `sitelink.mode`, `data.library`, `capture.screens`, `update.managed_by`,
+  `captions.gpu`) never copied nor kept in a template. A copy never carries the source
+  machine's PIN (`pin`, with the panel group, sets theirs); `apply_template` sends the
+  template's saved PIN (`panel_pin`, a hash), if it has one. `template` keeps the saved
+  PIN when a save of the Simple mode group gives none. In `apply`, `template` and `node`, a PIN of `none` (any case) is no
   PIN and an empty one is unchanged (left out).
 - `POST node {fingerprint, …}`: its yes/no fields (`require`, `site_lock`, `clock`,
   `pin_off`, `pin_site_only`, `lan_off`) take a boolean or `"true"`/`"on"`/`"false"`/

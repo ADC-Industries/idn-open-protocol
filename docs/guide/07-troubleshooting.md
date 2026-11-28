@@ -141,6 +141,13 @@ from the list a minute after it leaves the network.
 - **Captions are slow or fall behind:** the computer is too slow for the model. Set the
   model to *Automatic*, which measures the computer, or choose a smaller one (base.en).
   A computer with a graphics card does much better.
+- **Captions run on the CPU though the computer has a GPU:** by default captions use a
+  graphics card of its own, never a GPU built into the processor, because that one also
+  draws the screens and captions on it make frames late. To use the built-in GPU anyway,
+  set *Runs on* (advanced, on *Live captions*) to *Any GPU*, and check that frames stay
+  smooth. *Any GPU* still takes a graphics card first when there is one. `idn captions
+  --list-gpus` in a terminal lists the GPUs captions can use, each with its number and
+  name (the setting `captions.gpu` takes either, for one GPU of that computer).
 - **Words are wrong:** add names and unusual words to *Names and words to spell right*.
 - **Captions during songs:** captions leave lines out while music plays, because the
   speech model makes words up over music. If sung lines are wrongly captioned, or a

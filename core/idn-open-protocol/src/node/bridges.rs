@@ -329,10 +329,15 @@ pub struct CaptionsSetting {
     /// The language spoken, as whisper's code (`es`, `ko`…); `None`: English. An
     /// English-only model (`.en`) with another language runs as `auto` instead.
     pub lang: Option<String>,
+    /// Where whisper runs (`idn captions --gpu`): `None` is `auto` (a graphics card of its
+    /// own, else the CPU; never a GPU built into the processor, which renders the
+    /// screens); `cpu`, `integrated` (any GPU, a built-in one too; a card still first;
+    /// `any` is kept as this), a GPU's number, or a GPU's name.
+    pub gpu: Option<String>,
 }
 
 /// The captions setting names (`captions.KEY`).
-pub const CAPTIONS_KEYS: [&str; 6] = ["on", "source", "model", "words", "name", "lang"];
+pub const CAPTIONS_KEYS: [&str; 7] = ["on", "source", "model", "words", "name", "lang", "gpu"];
 
 impl CaptionsSetting {
     /// Changes one setting; empty: unset.
@@ -402,12 +407,30 @@ impl CaptionsSetting {
                 }
                 self.name = Some(n).filter(|n| !n.is_empty());
             }
+            // `auto` (empty), `cpu`, `integrated` (`any` kept as `integrated`), a GPU's
+            // number or part of its name (`index:N`, `name:TEXT` passed as they are).
+            // Refused: over 60 characters, a double quote, any control character (tabs,
+            // line breaks, NUL included), or a leading `-`.
+            "gpu" => {
+                const GPU_TAKES: &str = "captions.gpu: auto, cpu, integrated (or any), a GPU's number or its name (up to 60 characters; no quotes, control characters or leading -)";
+                if v.chars().any(char::is_control) {
+                    return Err(GPU_TAKES.to_owned());
+                }
+                let g = plain("gpu", 60).map_err(|_| GPU_TAKES.to_owned())?;
+                let word = g.to_ascii_lowercase();
+                self.gpu = match word.as_str() {
+                    "" | "auto" => None,
+                    "cpu" | "integrated" => Some(word),
+                    "any" => Some("integrated".to_owned()),
+                    _ => Some(g),
+                };
+            }
             _ => return Err(format!("no captions setting {key:?}")),
         }
         Ok(())
     }
 
-    /// `<captions on source model words name/>`.
+    /// `<captions on source model words name lang gpu/>`.
     pub fn to_element(&self) -> Element {
         Element::new("captions")
             .with_attr("on", if self.on { "true" } else { "false" })
@@ -416,6 +439,7 @@ impl CaptionsSetting {
             .with_attr("words", &self.words)
             .with_attr("name", self.name.as_deref().unwrap_or(""))
             .with_attr("lang", self.lang.as_deref().unwrap_or(""))
+            .with_attr("gpu", self.gpu.as_deref().unwrap_or(""))
     }
 
     /// The setting of a `<captions>` element (bad values are left unset).
@@ -456,6 +480,11 @@ impl CaptionsSetting {
         }
         if let Some(n) = &self.name {
             c.extend(["--name".into(), n.clone()]);
+        }
+        match self.gpu.as_deref() {
+            None => {}
+            Some("cpu") => c.push("--cpu".into()),
+            Some(g) => c.extend(["--gpu".into(), g.to_owned()]),
         }
         Some(c)
     }

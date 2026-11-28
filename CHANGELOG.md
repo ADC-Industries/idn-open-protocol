@@ -9,11 +9,14 @@ people who integrate against the crate. Newest first.
   bump may change the public API; a `0.y.z` → `0.y.(z+1)` bump does not. We follow that:
   breaking changes to the library API land on a minor bump and are listed here.
 - **Pin a released tag.** Integrators should depend on a tagged release, not `main`.
-  The current one is **`v0.3.6-Beta17`** (a pre-release). `main` moves between releases
-  and may break at any commit; tags do not move. In `Cargo.toml`:
+  The repository is https://github.com/ADC-Industries/idn-open-protocol; the current tag
+  is the newest release on its releases page
+  (https://github.com/ADC-Industries/idn-open-protocol/releases). `main` moves between
+  releases and may break at any commit; tags do not move. In `Cargo.toml`, with `TAG`
+  that release's tag:
 
   ```toml
-  idn-open-protocol = { git = "https://github.com/ADC-Industries/idn-open-protocol-dev", tag = "v0.3.6-Beta17" }
+  idn-open-protocol = { git = "https://github.com/ADC-Industries/idn-open-protocol", tag = "TAG" }
   ```
 
 - **Structs you only read are `#[non_exhaustive]`.** Returned/monitoring types
@@ -31,6 +34,53 @@ people who integrate against the crate. Newest first.
   ```
 
 ## [Unreleased]
+
+## [v0.3.8-Beta22] — 2026-11-28 (pre-release, with installers)
+
+### Changed
+- Captions: GPU choice; by default never an integrated GPU (it shares the screens'
+  rendering): a discrete card, else the CPU. `idn_captions::EngineConfig::gpu_device`
+  (`GpuDevice::Auto`, the default; `Integrated`, the old behaviour; `Index(N)`;
+  `Name(S)`; one not found is logged and `Auto` used); `gpu: false` is still the CPU
+  whatever it says. A machine with an integrated GPU alone now runs captions, and
+  measures "auto", on the CPU. `idn captions --gpu auto|any|N|NAME` (`integrated` is
+  `any`: any GPU, a built-in one too, a card still first; `--cpu` kept). `N` is a GPU's
+  index in ggml's numbering (not its place in `gpus()`, which is sorted best first); a
+  number of 100 or more no GPU has as its index is looked for as a whole run of digits
+  in the names (`--gpu 3060`; `1` never finds "ADL-S GT1"); `index:N`
+  and `name:TEXT` say which is meant, and `GpuDevice`'s text form writes numeric and
+  keyword names as `name:TEXT`. `idn captions --list-gpus` prints each GPU's index,
+  name, kind and memory (asked of the worker when one starts) and ends;
+  `idn_captions::gpus_here(&cfg)` lists them. A GPU asked for that isn't here is logged
+  once a process. The Node's `captions.gpu` (`auto`, `cpu`, `integrated` or `any`, a
+  number or a name; control characters refused), "Runs on" on its Live captions card and
+  in the Site Manager's machine settings; a machine's own setting (not copied to other
+  machines nor kept in templates). The captions worker's protocol is 2 (the GPU choice
+  in `load` and `devices`, and `gpus`); the engine uses only a worker of its own
+  protocol (both ship in `idn`).
+- API changes with it: `idn_captions::GpuDevice` (new enum; `parse` and `Display`
+  round-trip, a blank name printed as `auto`) and `EngineConfig::gpu_device` (new field:
+  build `EngineConfig` with `..Default::default()`); `idn_captions::gpus_here(&cfg)`
+  (new); `idn_open_protocol::node::bridges::CaptionsSetting::gpu` (new field,
+  `Option<String>`; `CaptionsSetting` is not `#[non_exhaustive]`, so a struct literal
+  without `..Default::default()` breaks); `bridges::CAPTIONS_KEYS` is now `[&str; 7]`
+  (was 6; `"gpu"` added); the IDN Node's typed status `CaptionsService::gpu` (new
+  field, `String`, `#[serde(default)]`: empty is auto). The Media Site Manager's
+  `GET /api/v1/settings_schema` fields may carry `other: true` (today only
+  `captions.gpu`): values outside the select's options are valid, and a UI shows and
+  keeps them rather than clearing them.
+
+### Fixed
+- IDN Voice: provisioning a handset with `issue: "credential"` takes the request's `url`
+  (VOICE-CLIENT.md §10) as the first of `urls` and for the link; it was ignored.
+- Panels: a select whose value isn't among its choices (set from the command line or
+  the Site Manager) shows it, marked, instead of nothing, and a save keeps it; before,
+  the next save cleared it. The desk's block set to 64 shows as the default.
+- Linux ASIO driver list (`idn_asio_abi` `register`): a driver folder it creates gets
+  mode 0775 and its files 0664 whatever the umask (a file of the same user already
+  holding the same text but another mode gets 0664, best effort, and only when it is
+  still that regular file); a folder already there, or a link to one, keeps its mode
+  and owner, so registering again works for a user who doesn't own it.
 
 ## [v0.3.8-Beta21] — 2026-11-27 (pre-release, with installers)
 

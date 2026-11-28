@@ -24,6 +24,9 @@ pub(crate) const MACHINE_OWN: &[&str] = &[
     "capture.screens",
     // Who installs and updates the machine's IDN Node (§N.23): how that machine was set up.
     "update.managed_by",
+    // Where that machine's captions run: a GPU's number or name means a GPU of that
+    // machine (on another, a different GPU or none).
+    "captions.gpu",
 ];
 
 /// The groups a copy takes when none are named.
@@ -52,14 +55,17 @@ impl Ty {
     }
 }
 
-/// One setting: its key (sent as is), type, label, placeholder, choices (value, words) and
-/// limits.
+/// One setting: its key (sent as is), type, label, placeholder, choices (value, words),
+/// whether a value outside the choices is valid, and limits.
 struct F {
     k: &'static str,
     ty: Ty,
     label: &'static str,
     ph: &'static str,
     opts: &'static [(&'static str, &'static str)],
+    /// A select whose values outside `opts` are valid too (a GPU's number or name): a
+    /// form shows such a value and keeps it rather than clearing it.
+    other: bool,
     min: Option<u32>,
     max: Option<u32>,
 }
@@ -71,6 +77,7 @@ const fn f(k: &'static str, ty: Ty, label: &'static str) -> F {
         label,
         ph: "",
         opts: &[],
+        other: false,
         min: None,
         max: None,
     }
@@ -528,6 +535,23 @@ const GROUPS: &[G] = &[
                 "Pastor Okafor, Ephesians",
             ),
             ph("captions.name", Text, "Captions source name", "Captions"),
+            // (A GPU's number or name set elsewhere is valid too: `other`.)
+            F {
+                other: true,
+                ..sel(
+                    "captions.gpu",
+                    "Runs on",
+                    // (Automatic as `auto`, sent: empty is left out, as for the language.)
+                    &[
+                        (
+                            "auto",
+                            "Automatic (a graphics card of its own, else the CPU)",
+                        ),
+                        ("integrated", "Any GPU, a built-in one too"),
+                        ("cpu", "The CPU only"),
+                    ],
+                )
+            },
         ],
     },
     G {
@@ -611,8 +635,10 @@ const GROUPS: &[G] = &[
 ];
 
 /// `GET /api/v1/settings_schema`: `{groups: [{id, title, hint, fields: [{key, type, label,
-/// placeholder, options: [{value, label}], min, max, machine_own}]}], machine_own,
-/// copy_default}`. Lines (`lines`) are sent one item a line.
+/// placeholder, options: [{value, label}], other, min, max, machine_own}]}], machine_own,
+/// copy_default}`. Lines (`lines`) are sent one item a line. `other: true` (on a select,
+/// only where it holds): values outside the options are valid; a form shows them and
+/// doesn't clear them.
 pub(crate) fn schema() -> Value {
     let groups: Vec<Value> = GROUPS
         .iter()
@@ -636,6 +662,9 @@ pub(crate) fn schema() -> Value {
                                 .map(|(v, l)| json!({"value": v, "label": l}))
                                 .collect(),
                         );
+                    }
+                    if x.other {
+                        o.insert("other".into(), true.into());
                     }
                     if let Some(m) = x.min {
                         o.insert("min".into(), m.into());
@@ -698,6 +727,12 @@ pub(crate) fn values_of(e: &Element) -> Map<String, Value> {
             "captions.lang" => match child("captions", "lang") {
                 "" => "en",
                 l => l,
+            }
+            .into(),
+            // (Automatic, unset on the machine, as the picker's `auto`.)
+            "captions.gpu" => match child("captions", "gpu") {
+                "" => "auto",
+                g => g,
             }
             .into(),
             k => {
@@ -810,6 +845,31 @@ mod tests {
         };
         assert_eq!(managed("setting"), "HostApp");
         assert_eq!(managed("package"), "");
+        // Captions' GPU: unset as the picker's `auto`; a GPU's number or name kept as it
+        // is (the select's `other`: a value outside its options is valid).
+        let gpu = |attr: &str| {
+            values_of(
+                &idn_open_protocol::xml::parse(&format!(
+                    r#"<idn_node_report><captions{attr}/></idn_node_report>"#
+                ))
+                .unwrap(),
+            )["captions.gpu"]
+                .clone()
+        };
+        assert_eq!(gpu(""), "auto");
+        assert_eq!(gpu(r#" gpu="""#), "auto");
+        assert_eq!(gpu(r#" gpu="1""#), "1");
+        assert_eq!(gpu(r#" gpu="RTX 3060""#), "RTX 3060");
+        let field = |key: &str| {
+            groups
+                .iter()
+                .flat_map(|g| g["fields"].as_array().unwrap())
+                .find(|f| f["key"] == key)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(field("captions.gpu")["other"], true);
+        assert!(field("captions.model").get("other").is_none());
 
         let k = copy_keys(&[
             "clock".into(),
@@ -818,10 +878,12 @@ mod tests {
             "sitelink".into(),
             "data".into(),
             "capture".into(),
+            "captions".into(),
         ])
         .unwrap();
         assert!(
-            k.contains(&"clock_domain")
+            k.contains(&"captions.model")
+                && k.contains(&"clock_domain")
                 && k.contains(&"panel_site_only")
                 && k.contains(&"netaudio.on")
                 && k.contains(&"sitelink.address")

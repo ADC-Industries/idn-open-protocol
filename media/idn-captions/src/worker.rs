@@ -29,17 +29,31 @@
 //! # Messages
 //!
 //! - First, from the worker unasked: `{"op":"hello","program":"idn-captions",
-//!   "version":V,"protocol":1}` ([`PROTOCOL`]). A program that doesn't say it within
-//!   [`HELLO_WITHIN`] isn't a captions worker (GNU libidn's `idn`, say) and isn't used.
+//!   "version":V,"protocol":2}` ([`PROTOCOL`]). A program that doesn't say it within
+//!   [`HELLO_WITHIN`] isn't a captions worker (GNU libidn's `idn`, say) and isn't used;
+//!   one of another protocol isn't used either (the engine and its worker ship together
+//!   in one `idn`). Protocol 2 added `"gpu_device"` to `load` and `devices`, and
+//!   `gpus`.
 //! - Each request carries an `"id"` (counting up from 1 within a worker's life) and its
 //!   answer the same `"id"`; the engine discards answers to requests it gave up on.
-//! - `{"op":"load","path":P,"gpu":B}` → `{"ok":true,"device":NAME,"priority":WHAT}`
-//!   (`"priority_error":WHY` instead when the priority couldn't be set) or
-//!   `{"error":WHY}`. The device is chosen in the worker, as in-process (the best GPU
-//!   when `gpu`).
-//! - `{"op":"devices","gpu":B}` → `{"device":NAME,"gpu":{"index","name","discrete",
-//!   "memory_mb"}|null}`: the device a load would choose ("auto" keys its choice on it, and
-//!   only the worker opens the GPU's driver).
+//! - `{"op":"load","path":P,"gpu":B,"gpu_device":G}` → `{"ok":true,"device":NAME,
+//!   "priority":WHAT}` (`"priority_error":WHY` instead when the priority couldn't be set)
+//!   or `{"error":WHY}`. The device is chosen in the worker by the same function as
+//!   in-process: with `gpu`, the GPU `G` gives: `"auto"` (a card of its own,
+//!   else the CPU), `"integrated"` or `"any"` (any GPU, a built-in one too; a card still
+//!   first), a number (that [`Gpu::index`]; one of 100 or more no GPU has is looked for
+//!   as a whole number in names) or `{"name":S}` (the first whose name contains `S`,
+//!   ignoring case);
+//!   missing or unknown: `"auto"` ([`crate::GpuDevice`]). An index or a name not found
+//!   adds `"device_note":WHY` (logged by the engine once a process) and takes `"auto"`'s
+//!   choice.
+//! - `{"op":"devices","gpu":B,"gpu_device":G}` → `{"device":NAME,"gpu":{"index","name",
+//!   "discrete","memory_mb"}|null}` (and `"device_note"` as for `load`): the device a load
+//!   would choose ("auto" keys its choice on it, and only the worker opens the GPU's
+//!   driver).
+//! - `{"op":"gpus"}` → `{"gpus":[{"index","name","discrete","memory_mb"}…]}`: the GPUs
+//!   whisper can use there, best first, each with its index in ggml's numbering
+//!   (`idn captions --list-gpus`).
 //! - `{"op":"pass","threads":T,"lang":L,"prompt":S}` (and when measuring
 //!   `"max_tokens":M`, `"temperature_inc":X`), the sound after it as `f32` little-endian
 //!   16 kHz mono → `{"segments":[{"text":S,"no_speech":X,"probs":[X…]}…]}` or
@@ -61,7 +75,7 @@
 //! a worker is ended (its input closed, killed a second later) on a thread of its own.
 
 use crate::whisper::{Abort, Local, PassParams, Segment};
-use crate::{Gpu, Priority, STOPPED};
+use crate::{Gpu, GpuDevice, Priority, STOPPED};
 use serde_json::{Value, json};
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -74,7 +88,7 @@ use std::time::{Duration, Instant};
 /// The argument that makes a program a captions worker ([`serve_if_asked`]).
 pub const FLAG: &str = "--idn-captions-worker";
 /// The version of these messages, in the worker's hello.
-pub const PROTOCOL: u64 = 1;
+pub const PROTOCOL: u64 = 2;
 /// The longest frame either side takes (8 MiB).
 pub const MAX_FRAME: usize = 8 << 20;
 /// How long a started worker has to say hello.
@@ -193,6 +207,39 @@ fn gpu_of(v: &Value) -> Option<Gpu> {
         discrete: v["discrete"].as_bool()?,
         memory_mb: v["memory_mb"].as_u64()?,
     })
+}
+
+/// The GPU choice in a request: `"auto"`, `"integrated"`, an index, or `{"name":S}` (a
+/// name in an object of its own, so that no name reads as a keyword or an index).
+pub(crate) fn gpu_device_json(d: &GpuDevice) -> Value {
+    match d {
+        GpuDevice::Auto => json!("auto"),
+        GpuDevice::Integrated => json!("integrated"),
+        GpuDevice::Index(n) => json!(n),
+        GpuDevice::Name(s) => json!({"name": s}),
+    }
+}
+
+/// A request's GPU choice (`"integrated"` or `"any"`, any case); missing or not
+/// understood: [`GpuDevice::Auto`].
+pub(crate) fn gpu_device_of(v: &Value) -> GpuDevice {
+    match v {
+        Value::String(s)
+            if s.trim().eq_ignore_ascii_case("integrated")
+                || s.trim().eq_ignore_ascii_case("any") =>
+        {
+            GpuDevice::Integrated
+        }
+        Value::Number(n) => n
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .map_or(GpuDevice::Auto, GpuDevice::Index),
+        Value::Object(o) => match o.get("name").and_then(Value::as_str) {
+            Some(s) if !s.trim().is_empty() => GpuDevice::Name(s.to_owned()),
+            _ => GpuDevice::Auto,
+        },
+        _ => GpuDevice::Auto,
+    }
 }
 
 /// A pass's request (its `id` set when sent).
@@ -418,9 +465,13 @@ pub(crate) fn serve(
                 // (A second load replaces the first: its memory let go first.)
                 local = None;
                 let path = PathBuf::from(h["path"].as_str().unwrap_or_default());
-                match Local::load(&path, h["gpu"].as_bool().unwrap_or(true)) {
+                let choice = gpu_device_of(&h["gpu_device"]);
+                match Local::load(&path, h["gpu"].as_bool().unwrap_or(true), &choice) {
                     Ok(l) => {
                         let mut a = json!({"ok": true, "device": l.device});
+                        if let Some(note) = &l.note {
+                            a["device_note"] = json!(note);
+                        }
                         match &priority {
                             Ok(p) => a["priority"] = json!(p),
                             Err(e) => a["priority_error"] = json!(e),
@@ -432,8 +483,19 @@ pub(crate) fn serve(
                 }
             }
             Some("devices") => {
-                let g = crate::device(h["gpu"].as_bool().unwrap_or(true));
-                json!({"device": crate::device_name(g.as_ref()), "gpu": gpu_json(g.as_ref())})
+                let (g, note) = crate::device(
+                    h["gpu"].as_bool().unwrap_or(true),
+                    &gpu_device_of(&h["gpu_device"]),
+                );
+                let mut a =
+                    json!({"device": crate::device_name(g.as_ref()), "gpu": gpu_json(g.as_ref())});
+                if let Some(note) = note {
+                    a["device_note"] = json!(note);
+                }
+                a
+            }
+            Some("gpus") => {
+                json!({"gpus": crate::gpus().iter().map(|g| gpu_json(Some(g))).collect::<Vec<_>>()})
             }
             Some("pass") => match (&mut local, audio_from(&payload)) {
                 (None, _) => json!({"error": "no model loaded"}),
@@ -856,29 +918,84 @@ pub(crate) fn connect(programs: &[PathBuf], level: Priority) -> Result<Worker, S
     Err(why.join("; "))
 }
 
-/// The device a worker among `programs` would run whisper on with `gpu` (as
-/// [`crate::device`] in this process): the GPU, if one, and its name. `Ok(None)` when no
-/// worker starts.
+/// The longest a `devices` or `gpus` probe waits for its answer (less when
+/// [`crate::EngineConfig::worker_timeout`] is less): no model or pass, only the GPU's
+/// driver opened, so a worker this slow is stuck and killed.
+pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// The device a worker among `programs` would run whisper on with `gpu` and `gpu_device`
+/// (as [`crate::device`] in this process): the GPU, if one, and its name. `Ok(None)` when
+/// no worker starts.
 pub(crate) fn probe_device(
     programs: &[PathBuf],
     level: Priority,
     gpu: bool,
+    gpu_device: &GpuDevice,
     timeout: Duration,
 ) -> Result<Option<(Option<Gpu>, String)>, String> {
     let Ok(mut w) = connect(programs, level) else {
         return Ok(None);
     };
-    let id = w.send(json!({"op": "devices", "gpu": gpu}), &[])?;
+    let id = w.send(
+        json!({"op": "devices", "gpu": gpu, "gpu_device": gpu_device_json(gpu_device)}),
+        &[],
+    )?;
     match w.wait(id, timeout, None) {
-        Ok(a) => Ok(Some((
-            gpu_of(&a["gpu"]),
-            a["device"].as_str().unwrap_or_default().to_owned(),
-        ))),
+        Ok(a) => {
+            if let Some(note) = a["device_note"].as_str() {
+                crate::say_once(note);
+            }
+            Ok(Some((
+                gpu_of(&a["gpu"]),
+                a["device"].as_str().unwrap_or_default().to_owned(),
+            )))
+        }
         Err(Fail::Dead(why)) => Err(format!("the captions worker: {why}")),
-        Err(_) => Err(format!(
-            "the captions worker didn't say its device within {} s",
-            timeout.as_secs()
-        )),
+        Err(_) => {
+            // (A worker stuck opening a GPU's driver is not left running.)
+            w.kill();
+            Err(format!(
+                "the captions worker didn't say its device within {} s",
+                timeout.as_secs()
+            ))
+        }
+    }
+}
+
+/// The GPUs a worker among `programs` finds ([`crate::gpus`] there: best first, each with
+/// its index). `Ok(None)` when no worker starts.
+pub(crate) fn probe_gpus(
+    programs: &[PathBuf],
+    level: Priority,
+    timeout: Duration,
+) -> Result<Option<Vec<Gpu>>, String> {
+    let Ok(mut w) = connect(programs, level) else {
+        return Ok(None);
+    };
+    let id = w.send(json!({"op": "gpus"}), &[])?;
+    match w.wait(id, timeout, None) {
+        Ok(a) => gpus_of(&a).map(Some),
+        Err(Fail::Dead(why)) => Err(format!("the captions worker: {why}")),
+        Err(_) => {
+            // (A worker stuck opening a GPU's driver is not left running.)
+            w.kill();
+            Err(format!(
+                "the captions worker didn't list its GPUs within {} s",
+                timeout.as_secs()
+            ))
+        }
+    }
+}
+
+/// The GPUs in a `gpus` answer (any not understood left out); an answer without the list
+/// is an error: the worker's `error`, else that the list is missing.
+fn gpus_of(a: &Value) -> Result<Vec<Gpu>, String> {
+    match a["gpus"].as_array() {
+        Some(l) => Ok(l.iter().filter_map(gpu_of).collect()),
+        None => Err(match a["error"].as_str() {
+            Some(why) => format!("the captions worker: {why}"),
+            None => "the captions worker: no \"gpus\" in its answer".to_owned(),
+        }),
     }
 }
 
@@ -937,6 +1054,8 @@ pub(crate) struct Remote {
     model: String,
     /// On the GPU (off after a worker ended loading it there).
     gpu: bool,
+    /// Which GPU ([`crate::EngineConfig::gpu_device`]).
+    gpu_device: GpuDevice,
     timeout: Duration,
     /// Ends in a row ([`backoff`]).
     deaths: u32,
@@ -950,8 +1069,8 @@ pub(crate) struct Remote {
 }
 
 /// A load request.
-fn load_header(model: &str, gpu: bool) -> Value {
-    json!({"op": "load", "path": model, "gpu": gpu})
+fn load_header(model: &str, gpu: bool, gpu_device: &GpuDevice) -> Value {
+    json!({"op": "load", "path": model, "gpu": gpu, "gpu_device": gpu_device_json(gpu_device)})
 }
 
 /// The device and priority from a load's answer.
@@ -974,6 +1093,7 @@ impl Remote {
         level: Priority,
         model: &Path,
         gpu: bool,
+        gpu_device: GpuDevice,
         timeout: Duration,
     ) -> Result<Remote, OpenError> {
         let path = model
@@ -993,6 +1113,7 @@ impl Remote {
             level,
             model: path,
             gpu,
+            gpu_device,
             timeout,
             deaths: 0,
             why: String::new(),
@@ -1002,7 +1123,7 @@ impl Remote {
         };
         loop {
             let id = w
-                .send(load_header(&r.model, r.gpu), &[])
+                .send(load_header(&r.model, r.gpu, &r.gpu_device), &[])
                 .map_err(|e| OpenError::Model(format!("the captions worker: {e}")))?;
             match w.wait(id, timeout, None) {
                 Ok(a) => {
@@ -1038,6 +1159,10 @@ impl Remote {
     /// `w` up with the model loaded (`a`: the load's answer); logged.
     fn up(&mut self, w: Worker, a: &Value) {
         let (device, priority) = loaded(a);
+        // (Logged once a process: a worker started again says it again.)
+        if let Some(note) = a["device_note"].as_str() {
+            crate::say_once(note);
+        }
         let line = match &priority {
             Ok(p) => format!(
                 "captions: whisper in a worker process ({}) at {} priority ({p}) on {device}",
@@ -1140,13 +1265,15 @@ impl Remote {
                     w.kill();
                     self.died_at(&why, None, at);
                 }
-                Some(Ok(())) => match w.send(load_header(&self.model, self.gpu), &[]) {
-                    Ok(id) => self.state = State::Loading { w, id },
-                    Err(why) => {
-                        w.kill();
-                        self.died(&why, None);
+                Some(Ok(())) => {
+                    match w.send(load_header(&self.model, self.gpu, &self.gpu_device), &[]) {
+                        Ok(id) => self.state = State::Loading { w, id },
+                        Err(why) => {
+                            w.kill();
+                            self.died(&why, None);
+                        }
                     }
-                },
+                }
             },
             State::Loading { mut w, id } => match w.poll(id) {
                 None => self.state = State::Loading { w, id },
@@ -1328,12 +1455,90 @@ mod tests {
         };
         assert_eq!(gpu_of(&gpu_json(Some(&g))), Some(g));
         assert_eq!(gpu_of(&gpu_json(None)), None);
-        // The hello: ours, another protocol's, and anything else.
+        // The hello: ours, another protocol's (1: before the GPU choice), and anything
+        // else.
         assert!(check_hello(&hello()).is_ok());
         let mut other = hello();
-        other["protocol"] = json!(2);
+        other["protocol"] = json!(1);
         assert!(check_hello(&other).is_err());
         assert!(check_hello(&json!({"op": "pass"})).is_err());
+    }
+
+    /// The GPU choice crosses to the worker as it was given, in `load` and `devices`;
+    /// missing or not understood is `auto`.
+    #[test]
+    fn the_gpu_choice_round_trips() {
+        for d in [
+            GpuDevice::Auto,
+            GpuDevice::Integrated,
+            GpuDevice::Index(0),
+            GpuDevice::Index(3),
+            GpuDevice::Name("RTX 3060".into()),
+            // (A name that looks like another form stays a name.)
+            GpuDevice::Name("auto".into()),
+            GpuDevice::Name("12".into()),
+        ] {
+            assert_eq!(gpu_device_of(&gpu_device_json(&d)), d, "{d:?}");
+            let h = header_of(&encode(&load_header("/m/ggml-base.en.bin", true, &d), &[]));
+            assert_eq!(
+                (h["op"].as_str(), h["gpu"].as_bool()),
+                (Some("load"), Some(true))
+            );
+            assert_eq!(gpu_device_of(&h["gpu_device"]), d, "{h}");
+        }
+        assert_eq!(gpu_device_json(&GpuDevice::Auto), json!("auto"));
+        assert_eq!(gpu_device_json(&GpuDevice::Integrated), json!("integrated"));
+        assert_eq!(gpu_device_json(&GpuDevice::Index(2)), json!(2));
+        assert_eq!(
+            gpu_device_json(&GpuDevice::Name("Arc".into())),
+            json!({"name": "Arc"})
+        );
+        for v in [
+            Value::Null,
+            json!("discrete"),
+            json!(-1),
+            json!(1.5),
+            json!({"name": " "}),
+            json!([0]),
+        ] {
+            assert_eq!(gpu_device_of(&v), GpuDevice::Auto, "{v}");
+        }
+        // The keywords in any case; `any` as `integrated`.
+        for v in [
+            json!("Integrated"),
+            json!("INTEGRATED"),
+            json!("any"),
+            json!(" Any "),
+        ] {
+            assert_eq!(gpu_device_of(&v), GpuDevice::Integrated, "{v}");
+        }
+        assert_eq!(gpu_device_of(&json!("AUTO")), GpuDevice::Auto);
+        // The GPUs listed, in the order sent; one not understood left out.
+        let g = Gpu {
+            index: 1,
+            name: "NVIDIA GeForce RTX 3060".into(),
+            discrete: true,
+            memory_mb: 12288,
+        };
+        assert_eq!(
+            gpus_of(&json!({"gpus": [gpu_json(Some(&g)), {"index": 0}]})),
+            Ok(vec![g])
+        );
+        assert_eq!(gpus_of(&json!({"gpus": []})), Ok(vec![]));
+        // No list: the worker's error, else that the list is missing; never an empty list.
+        assert_eq!(
+            gpus_of(&json!({"error": "unknown op"})),
+            Err("the captions worker: unknown op".to_owned())
+        );
+        assert_eq!(
+            gpus_of(&json!({"gpus": "none"})),
+            Err("the captions worker: no \"gpus\" in its answer".to_owned())
+        );
+        // A request without the field (as protocol 1 sent it): auto.
+        assert_eq!(
+            gpu_device_of(&json!({"op": "devices", "gpu": true})["gpu_device"]),
+            GpuDevice::Auto
+        );
     }
 
     #[test]
@@ -1478,6 +1683,7 @@ mod tests {
             level: Priority::Low,
             model: "/nowhere/ggml-base.en.bin".into(),
             gpu: false,
+            gpu_device: GpuDevice::Auto,
             timeout: Duration::from_secs(60),
             deaths: 0,
             why: String::new(),
@@ -1606,15 +1812,22 @@ mod tests {
             return;
         };
         let programs = [PathBuf::from(program)];
-        let (_, device) = probe_device(&programs, Priority::Low, false, Duration::from_secs(60))
-            .unwrap()
-            .expect("it says hello");
+        let (_, device) = probe_device(
+            &programs,
+            Priority::Low,
+            false,
+            &GpuDevice::Auto,
+            Duration::from_secs(60),
+        )
+        .unwrap()
+        .expect("it says hello");
         assert!(device.starts_with("CPU"), "{device}");
         let e = Remote::open(
             &programs,
             Priority::Low,
             Path::new("/nowhere/ggml-base.en.bin"),
             false,
+            GpuDevice::Auto,
             Duration::from_secs(60),
         )
         .err()

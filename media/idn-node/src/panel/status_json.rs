@@ -214,6 +214,7 @@ impl State {
                 words: child("captions", "words"),
                 name: child("captions", "name"),
                 lang: child("captions", "lang"),
+                gpu: child("captions", "gpu"),
             },
             netaudio: ps::NetAudio {
                 on: on("netaudio", "on"),
