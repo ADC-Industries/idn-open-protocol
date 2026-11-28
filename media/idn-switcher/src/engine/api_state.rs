@@ -237,7 +237,8 @@ impl Switcher {
                 .collect()
         };
         json!({
-            "version": s.version,
+            // (The public version: the timers' seconds moving on count, see `version`.)
+            "version": s.version + sh.timer_ticks.load(Ordering::Relaxed),
             "multiview": {
                 "tiles": tiles,
                 "output": sh.multiview_out.lock_ok().is_some(),

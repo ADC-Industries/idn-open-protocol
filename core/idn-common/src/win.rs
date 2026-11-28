@@ -79,6 +79,16 @@ pub fn windows_build() -> Option<u32> {
         .ok()
 }
 
+/// This process ignores Ctrl+C from now on (Ctrl+Break and closing still end it): for a
+/// launcher waiting on a program in the same console, which gets the Ctrl+C itself and
+/// can finish (remove a partial file) before the launcher, and its job, end.
+pub fn ignore_ctrl_c() {
+    // SAFETY: no handler, TRUE: the documented way to ignore CTRL_C_EVENT.
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

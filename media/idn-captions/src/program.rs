@@ -6,12 +6,13 @@
 //!   idn-captions SOURCE [--name NAME] [--model auto|NAME] [--words TEXT] [--lang en]
 //!                [--channels 1,2] [--models-dir DIR] [--cpu] [--keep-music] [--no-node]
 
-use crate::{Engine, EngineConfig, MODEL_LIST, auto_choose, ensure_model, model_speaks};
+use crate::{Engine, EngineConfig, MODEL_LIST, auto_choose_stop, ensure_model_stop, model_speaks};
 use idn_common::sync::LockOk as _;
 use idn_open_protocol::api::{Publisher, PublisherConfig};
 use idn_open_protocol::input::{Input, InputConfig, InputEvent};
 use idn_open_protocol::text::TextSource;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -37,6 +38,20 @@ fn fail(m: &str) -> ! {
     std::process::exit(1)
 }
 
+/// `r`'s value; else, once a stop was asked (the error [`crate::STOPPED`], or any error
+/// after it: a worker ended by the same Ctrl+C), "stopped" said and the program ended;
+/// else the error said and the program ended with 1.
+fn or_end<T>(r: Result<T, String>, stop: &AtomicBool) -> T {
+    match r {
+        Ok(v) => v,
+        Err(_) if stop.load(Ordering::SeqCst) => {
+            eprintln!("idn-captions: stopped");
+            std::process::exit(0)
+        }
+        Err(e) => fail(&e),
+    }
+}
+
 fn default_models_dir() -> PathBuf {
     idn_open_protocol::link::LinkConfig::default_dir()
         .or_else(|| {
@@ -49,6 +64,25 @@ fn default_models_dir() -> PathBuf {
 pub fn main() {
     idn_open_protocol::log::set_logger(|m| eprintln!("{m}"));
     idn_open_protocol::diag::init("idn-captions");
+    // Ctrl+C and SIGTERM (Windows: Ctrl+C, Ctrl+Break, the console closed) set `stop`: a
+    // download or measuring under way ends within about a second, and the loop below ends,
+    // dropping the engine (its worker ended and reaped) and the source. The handler gives
+    // its hooks two seconds, then ends the process; this one waits for `finished` within
+    // that time.
+    #[cfg(unix)]
+    idn_open_protocol::shutdown::install_for_command();
+    let stop = Arc::new(AtomicBool::new(false));
+    let finished = Arc::new(AtomicBool::new(false));
+    let _stop_on_signal = {
+        let (stop, finished) = (stop.clone(), finished.clone());
+        idn_open_protocol::shutdown::register(move || {
+            stop.store(true, Ordering::SeqCst);
+            let until = Instant::now() + Duration::from_millis(1800);
+            while !finished.load(Ordering::SeqCst) && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        })
+    };
     let (mut source, mut name, mut model) =
         (None::<String>, "Captions".to_owned(), "auto".to_owned());
     let (mut words, mut lang, mut dir, mut use_node, mut gpu) =
@@ -119,8 +153,16 @@ pub fn main() {
     };
     let dir = dir.unwrap_or_else(default_models_dir);
     if model == "auto" {
-        model = auto_choose(&dir, &cfg, &mut |m| eprintln!("idn-captions: {m}"))
-            .unwrap_or_else(|e| fail(&e));
+        model = or_end(
+            auto_choose_stop(
+                &dir,
+                &cfg,
+                &mut |m| eprintln!("idn-captions: {m}"),
+                &mut |_, _, _| {},
+                &stop,
+            ),
+            &stop,
+        );
     }
     if !MODEL_LIST.iter().any(|(m, _, _)| *m == model) {
         fail(&format!(
@@ -134,19 +176,31 @@ pub fn main() {
         ));
     }
     let mut tenth = 0;
-    let path = ensure_model(&dir, &model, &mut |n, total| {
-        if let Some(t) = total.filter(|t| *t > 0)
-            && n * 10 / t != tenth
-        {
-            tenth = n * 10 / t;
-            eprintln!(
-                "idn-captions: downloading the {model} model: {}%",
-                tenth * 10
-            );
-        }
-    })
-    .unwrap_or_else(|e| fail(&e));
-    let mut engine = Engine::new(&path, cfg).unwrap_or_else(|e| fail(&e));
+    let path = or_end(
+        ensure_model_stop(
+            &dir,
+            &model,
+            &mut |n, total| {
+                if let Some(t) = total.filter(|t| *t > 0)
+                    && n * 10 / t != tenth
+                {
+                    tenth = n * 10 / t;
+                    eprintln!(
+                        "idn-captions: downloading the {model} model: {}%",
+                        tenth * 10
+                    );
+                }
+            },
+            &stop,
+        ),
+        &stop,
+    );
+    let mut engine = or_end(Engine::new(&path, cfg), &stop);
+    if stop.load(Ordering::SeqCst) {
+        drop(engine);
+        eprintln!("idn-captions: stopped");
+        return;
+    }
     let node = use_node
         .then(|| idn_open_protocol::node::Node::connect("idn-captions").ok())
         .flatten();
@@ -180,7 +234,7 @@ pub fn main() {
     );
     // The sound, gathered on its own thread while whisper works: (mono, rate).
     let heard: Arc<Mutex<(Vec<f32>, u32)>> = Arc::default();
-    {
+    let listening = {
         let heard = heard.clone();
         let asked = channels.len();
         let mut told = false;
@@ -192,8 +246,10 @@ pub fn main() {
             .map(|c| (c + 1).to_string())
             .collect::<Vec<_>>()
             .join(",");
+        let stop = stop.clone();
         std::thread::spawn(move || {
-            loop {
+            // (Ended with the program's stop: the input dropped, leaving the source.)
+            while !stop.load(Ordering::SeqCst) {
                 if !heard_any && !told_none && started.elapsed() > Duration::from_secs(10) {
                     told_none = true;
                     eprintln!(
@@ -229,23 +285,30 @@ pub fn main() {
                     _ => {}
                 }
             }
-        });
-    }
+        })
+    };
     let mut said_at = Instant::now();
     // The last step's error, said once while it repeats (a worker starting again fails
     // each step the same way until it is up).
     let mut last_error: Option<String> = None;
-    loop {
+    while !stop.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(250));
-        let (chunk, rate) = {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+        let got = {
             let mut h = heard.lock_ok();
-            if h.1 == 0 || h.0.len() < h.1 as usize {
-                continue;
-            }
-            (std::mem::take(&mut h.0), h.1)
+            (h.1 != 0 && h.0.len() >= h.1 as usize).then(|| (std::mem::take(&mut h.0), h.1))
+        };
+        let Some((chunk, rate)) = got else {
+            // No second of sound yet (or none comes): the worker looked after all the
+            // same, so one that ended is started again on time.
+            engine.tend();
+            continue;
         };
         engine.push(&chunk, rate);
-        match engine.step() {
+        match engine.step_stop(&stop) {
+            Err(_) if stop.load(Ordering::SeqCst) => break,
             Ok(lines) => {
                 last_error = None;
                 for l in lines {
@@ -270,4 +333,13 @@ pub fn main() {
             );
         }
     }
+    // Stopped: the engine dropped first (its worker's input closed: it ends, and is
+    // reaped, within a second), then the source (its goodbyes) and the input.
+    eprintln!("idn-captions: stopping");
+    drop(engine);
+    drop(out);
+    drop(publisher);
+    let _ = listening.join();
+    eprintln!("idn-captions: stopped");
+    finished.store(true, Ordering::SeqCst);
 }

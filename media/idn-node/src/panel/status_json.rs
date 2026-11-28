@@ -138,6 +138,7 @@ impl State {
         let on = |n: &str, k: &str| s.child(n).and_then(|c| c.attr(k)) == Some("true");
         let at_list =
             |d: &idn_open_protocol::xml::Element| d.attr("at").and_then(|v| v.parse::<u64>().ok());
+        let (vsound, vscreens) = self.devices();
         let status = ps::NodeStatus {
             version: 0,
             node_version: a("node"),
@@ -372,21 +373,11 @@ impl State {
             } else {
                 Value::Null
             },
-            // IDN's virtual sound card (Windows 11, §N.37): whether this Windows takes it,
-            // installed, its package here; null elsewhere.
-            vsound: if cfg!(windows) {
-                let d = &crate::drivers::AUDIO;
-                json!({
-                    "supported": crate::drivers::win::supported(d),
-                    "installed": crate::drivers::win::installed(d),
-                    "package": crate::drivers::package(d).is_some(),
-                })
-            } else {
-                Value::Null
-            },
-            // Virtual screens (§N.36): Windows' driver and its screens, or Linux's
-            // connectors; null elsewhere.
-            vscreens: vscreens_state(),
+            // IDN's virtual sound card (Windows 11, §N.37) and virtual screens (§N.36:
+            // Windows' driver and its screens, or Linux's connectors); null elsewhere.
+            // Read at most every 30 s, and after a change to them here.
+            vsound,
+            vscreens,
             // The encoders that work in the session (the session agent's list), for the Video page.
             encoders: s.child("encoders").map_or(Value::Null, |d| {
                 json!({

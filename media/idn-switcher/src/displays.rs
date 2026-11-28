@@ -2,6 +2,7 @@
 //! a display of its machine — a projector, a confidence monitor — each through its own
 //! `idn-display` process (next to this program), started again if it stops.
 
+use idn_common::backoff::Backoff;
 use idn_common::cmd::RunWithin as _;
 use idn_common::sync::LockOk as _;
 use serde_json::{Value, json};
@@ -51,6 +52,8 @@ struct Running {
     with: (Screen, String),
     /// Its last line on standard error.
     said: Arc<Mutex<String>>,
+    /// When it was started.
+    started: Instant,
 }
 
 struct Inner {
@@ -58,8 +61,12 @@ struct Inner {
     resolve: Resolve,
     want: Mutex<Vec<Screen>>,
     running: Mutex<BTreeMap<String, Running>>,
-    /// When each screen's last start failed (it waits 3 s before trying again).
-    failed: Mutex<BTreeMap<String, (Instant, String)>>,
+    /// When each screen's last start failed, how long it waits before trying again, and
+    /// why.
+    failed: Mutex<BTreeMap<String, (Instant, Duration, String)>>,
+    /// Each screen's waits before a start again: 3 s, growing while its display keeps
+    /// stopping; back to 3 s after a display that ran a minute (locked after `failed`).
+    waits: Mutex<BTreeMap<String, Backoff>>,
     stop: AtomicBool,
 }
 
@@ -91,6 +98,7 @@ impl Displays {
             want: Mutex::new(Vec::new()),
             running: Mutex::new(BTreeMap::new()),
             failed: Mutex::new(BTreeMap::new()),
+            waits: Mutex::new(BTreeMap::new()),
             stop: AtomicBool::new(false),
         });
         let thread = {
@@ -117,6 +125,7 @@ impl Displays {
         screens.retain(|s| seen.insert(s.screen.clone()));
         *self.inner.want.lock_ok() = screens;
         self.inner.failed.lock_ok().clear();
+        self.inner.waits.lock_ok().clear();
         tend(&self.inner);
     }
 
@@ -137,7 +146,7 @@ impl Displays {
                     let r = running.get(&s.screen);
                     let error = failed
                         .get(&s.screen)
-                        .map(|(_, e)| e.clone())
+                        .map(|(_, _, e)| e.clone())
                         .or_else(|| {
                             (self.inner.resolve)(&s.output)
                                 .is_none()
@@ -166,11 +175,22 @@ impl Displays {
 }
 
 /// Brings the processes in line with what is wanted: stops those no longer wanted or
-/// changed, starts those missing (not within 3 s of a failed start).
+/// changed, starts those missing (not within the screen's wait after a failed start: 3 s,
+/// growing to a minute).
 fn tend(inner: &Inner) {
     let want = inner.want.lock_ok().clone();
     let mut running = inner.running.lock_ok();
     let mut failed = inner.failed.lock_ok();
+    let mut waits = inner.waits.lock_ok();
+    let mut wait_for = |screen: &str, ran: Option<Duration>| {
+        let b = waits
+            .entry(screen.to_owned())
+            .or_insert_with(screen_backoff);
+        if ran.is_some_and(|r| r >= STEADY) {
+            b.reset();
+        }
+        b.next()
+    };
     // Ended by themselves: their last words are why.
     let ended: Vec<String> = running
         .iter_mut()
@@ -179,10 +199,12 @@ fn tend(inner: &Inner) {
     for k in ended {
         if let Some(r) = running.remove(&k) {
             let said = r.said.lock_ok().clone();
+            let wait = wait_for(&k, Some(r.started.elapsed()));
             failed.insert(
                 k,
                 (
                     Instant::now(),
+                    wait,
                     if said.is_empty() {
                         "the display stopped".into()
                     } else {
@@ -208,7 +230,7 @@ fn tend(inner: &Inner) {
         };
         if failed
             .get(&s.screen)
-            .is_some_and(|(t, _)| t.elapsed() < Duration::from_secs(3))
+            .is_some_and(|(t, w, _)| t.elapsed() < *w)
         {
             continue;
         }
@@ -254,13 +276,19 @@ fn tend(inner: &Inner) {
                         _pipe: pipe,
                         with: (s, address),
                         said,
+                        started: Instant::now(),
                     },
                 );
             }
             Err(e) => {
+                let wait = wait_for(&s.screen, None);
                 failed.insert(
                     s.screen.clone(),
-                    (Instant::now(), format!("{}: {e}", inner.exe.display())),
+                    (
+                        Instant::now(),
+                        wait,
+                        format!("{}: {e}", inner.exe.display()),
+                    ),
                 );
             }
         }
@@ -278,6 +306,16 @@ fn tend(inner: &Inner) {
         }
     }
     failed.retain(|k, _| want.iter().any(|s| &s.screen == k));
+    waits.retain(|k, _| want.iter().any(|s| &s.screen == k));
+}
+
+/// A display that ran this long before it stopped was working: its next wait is the
+/// first again.
+const STEADY: Duration = Duration::from_secs(60);
+
+/// A screen's waits before its display is started again: 3 s, doubling, up to a minute.
+fn screen_backoff() -> Backoff {
+    Backoff::new(Duration::from_secs(3), Duration::from_secs(60))
 }
 
 impl Drop for Displays {

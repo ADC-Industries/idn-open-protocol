@@ -112,9 +112,9 @@ fn main() -> std::io::Result<()> {
         let _ = (f.width, f.height);
     });
 
-    // State for a UI: `version()` bumps on every change, `wait_change()` blocks until the
-    // version moves past the one you hold (or it times out), and `state()` is a JSON
-    // snapshot. A UI loop waits, reads, redraws, repeats.
+    // State for a UI: `version()` bumps on every change (a running timer's seconds too),
+    // `wait_change()` blocks until the version moves past the one you hold (or it times
+    // out), and `state()` is a JSON snapshot. A UI loop waits, reads, redraws, repeats.
     let v = sw.version();
     let _ = sw.wait_change(v, Duration::from_millis(50));
     println!("{}", sw.state());

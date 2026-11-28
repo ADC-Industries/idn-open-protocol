@@ -67,6 +67,7 @@ impl NodeCore {
             media: crate::media::Media::new(crate::media::media_dir(dir, false)),
             pin_lock: idn_open_protocol::web::PinLock::default(),
             search_now: AtomicBool::new(false),
+            crash_kept: AtomicBool::new(false),
             update: Mutex::default(),
             update_available: Mutex::default(),
             service: AtomicBool::new(false),
@@ -441,7 +442,18 @@ impl NodeCore {
     /// service.
     pub fn set_service(&self, v: bool) {
         self.service.store(v, Ordering::Relaxed);
-        self.media.set_dir(crate::media::media_dir(&self.dir, v));
+        let dir = crate::media::media_dir(&self.dir, v);
+        // Made now, not only when the service is installed or a file arrives: a Node run
+        // by hand had no folder to put a file in for media_send.
+        let made = if v {
+            crate::media::make_dir(&dir)
+        } else {
+            std::fs::create_dir_all(&dir)
+        };
+        if let Err(e) = made {
+            idn_open_protocol::log::log(&format!("the media folder {}: {e}", dir.display()));
+        }
+        self.media.set_dir(dir);
     }
 
     /// Where an update is (§N.23), for the report and the panel.

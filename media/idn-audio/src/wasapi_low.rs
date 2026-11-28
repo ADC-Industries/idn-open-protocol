@@ -101,6 +101,15 @@ fn layout(fmt: &wasapi::WaveFormat) -> Option<idn_common::pcm::Pcm> {
     idn_common::pcm::Pcm::of(fmt.get_bitspersample() as usize, float)
 }
 
+/// The waits before a lost device is opened again: 1 s, doubling while it stays away, up
+/// to 3 s (a replugged interface comes back within that); back to 1 s once it opens.
+fn reopen_backoff() -> idn_common::backoff::Backoff {
+    idn_common::backoff::Backoff::new(
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(3),
+    )
+}
+
 /// Sleeps up to `d`, waking when `stop` is set.
 fn nap(stop: &AtomicBool, d: std::time::Duration) {
     let until = std::time::Instant::now() + d;
@@ -164,8 +173,8 @@ fn open<T>(
 
 /// Starts capturing from the device at the smallest period at or above `want` frames:
 /// each packet to `feed` as interleaved f32 in the device's channels ([`capture_format`]).
-/// A device that goes (unplugged, its format changed) is opened again every second;
-/// `on_error` counts each loss.
+/// A device that goes (unplugged, its format changed) is opened again after a second, then
+/// every 2 to 3 s while it stays away; `on_error` counts each loss.
 pub fn start_capture(
     device: Option<&str>,
     want: u32,
@@ -183,6 +192,7 @@ pub fn start_capture(
             let (mut bytes, mut f) = (Vec::<u8>::new(), Vec::<f32>::new());
             // The format the capture's conversion was made for (the first open's).
             let mut made_for: Option<(u32, u16)> = None;
+            let mut again = reopen_backoff();
             while !s.load(Ordering::Relaxed) {
                 let (client, fmt, event, cap, period) =
                     match open(dev_name.as_deref(), Direction::Capture, want, tx.is_some(), |c| c.get_audiocaptureclient()) {
@@ -193,7 +203,7 @@ pub fn start_capture(
                                 return;
                             }
                             None => {
-                                nap(&s, std::time::Duration::from_secs(1));
+                                nap(&s, again.next());
                                 continue;
                             }
                         },
@@ -213,6 +223,7 @@ pub fn start_capture(
                     continue;
                 }
                 made_for = Some(now_fmt);
+                again.reset();
                 match tx.take() {
                     Some(t) => {
                         let _ = t.send(Ok((period, rate)));
@@ -264,7 +275,7 @@ pub fn start_capture(
                     }
                 }
                 let _ = client.stop_stream();
-                nap(&s, std::time::Duration::from_secs(1));
+                nap(&s, again.next());
             }
         })?;
     match rx.recv() {
@@ -288,7 +299,8 @@ pub fn start_capture(
 /// Starts playing `mixer` on the device at the smallest period at or above `want`
 /// frames. `mixer` must have the device's rate and channels ([`mix_format`]). A device
 /// that goes (unplugged, its format changed) is counted as an error on the mixer and
-/// opened again every second (the default device then, if none was named).
+/// opened again after a second, then every 2 to 3 s while it stays away (the default
+/// device then, if none was named).
 pub fn start(device: Option<&str>, mixer: Arc<Mixer>, want: u32) -> io::Result<LowLatency> {
     let stop = Arc::new(AtomicBool::new(false));
     let (tx, rx) = std::sync::mpsc::sync_channel::<io::Result<(u32, u32)>>(1);
@@ -300,6 +312,7 @@ pub fn start(device: Option<&str>, mixer: Arc<Mixer>, want: u32) -> io::Result<L
             let mut tx = Some(tx);
             let mut f = Vec::<f32>::new();
             let mut bytes = Vec::<u8>::new();
+            let mut again = reopen_backoff();
             while !s.load(Ordering::Relaxed) {
                 let (client, fmt, event, render, period) = match open(
                     dev_name.as_deref(),
@@ -315,7 +328,7 @@ pub fn start(device: Option<&str>, mixer: Arc<Mixer>, want: u32) -> io::Result<L
                             return;
                         }
                         None => {
-                            nap(&s, std::time::Duration::from_secs(1));
+                            nap(&s, again.next());
                             continue;
                         }
                     },
@@ -349,6 +362,7 @@ pub fn start(device: Option<&str>, mixer: Arc<Mixer>, want: u32) -> io::Result<L
                         }
                     }
                 }
+                again.reset();
                 match tx.take() {
                     Some(t) => {
                         let _ = t.send(Ok((period, rate)));
@@ -406,7 +420,7 @@ pub fn start(device: Option<&str>, mixer: Arc<Mixer>, want: u32) -> io::Result<L
                     }
                 }
                 let _ = client.stop_stream();
-                nap(&s, std::time::Duration::from_secs(1));
+                nap(&s, again.next());
             }
         })?;
     match rx.recv() {

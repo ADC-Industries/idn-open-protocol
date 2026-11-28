@@ -102,6 +102,7 @@ impl Switcher {
             keep_active: AtomicBool::new(false),
             on_air_snapshot: Mutex::new(None),
             used_at: Mutex::new(None),
+            use_changed: Condvar::new(),
             active: AtomicBool::new(false),
             tile_small: Mutex::new(None),
             latest: Mutex::new(None),
@@ -231,6 +232,7 @@ impl Switcher {
         slot.keep_active.store(on, Ordering::Relaxed);
         if on {
             *slot.used_at.lock_ok() = Some(Instant::now());
+            slot.use_changed.notify_all();
         }
         self.edit(|_| Ok(()))
     }
@@ -266,6 +268,7 @@ impl Switcher {
         self.shared.cameras.lock_ok().remove(&id);
         self.shared.views.lock_ok().remove(&id);
         slot.stop.store(true, Ordering::Relaxed);
+        slot.wake_unused();
         if let Some(ctl) = self.shared.slides.lock_ok().remove(&id) {
             ctl.wake.notify_all();
         }

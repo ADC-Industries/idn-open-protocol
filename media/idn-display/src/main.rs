@@ -347,8 +347,14 @@ fn main() {
         eprintln!("idn-display: a SOURCE to show\n{USAGE}");
         std::process::exit(2);
     }
-    // The site's encryption, through the machine's IDN Node when there is one.
-    let node = idn_open_protocol::node::Node::connect("idn-display").ok();
+    // The site's encryption, through the machine's IDN Node when there is one. Not to list
+    // the screens: the display service does that every 10 s, and each listing's connect
+    // and leave filled the Node's log.
+    let node = if list && source.is_none() {
+        None
+    } else {
+        idn_open_protocol::node::Node::connect("idn-display").ok()
+    };
     let cfg = source.map(|s| receive::Config {
         source: s,
         receiver_name: name.clone(),

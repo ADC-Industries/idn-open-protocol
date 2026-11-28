@@ -365,7 +365,7 @@ impl SiteManagerPanel {
                 .ok(),
             http_seq: Mutex::default(),
             keys_lock: Mutex::default(),
-            status_seen: Mutex::new((0, 0)),
+            status_seen: Mutex::new((0, 0, serde_json::Value::Null, std::time::Instant::now())),
             status_cache: Mutex::new(None),
         });
         // The Site Manager's own typed events (§N.41) into the site's log, with the
@@ -472,8 +472,11 @@ impl SiteManagerPanel {
                                 .collect();
                             netaudio_pool::sweep_later(&s.authority, &s.dir, held);
                         }
-                        // The site's machines on its MQTT broker (§N.34), where they changed.
-                        if let Some(m) = &s.mqtt {
+                        // The site's machines on its MQTT broker (§N.34), where they changed
+                        // (the status made only while the broker listens).
+                        if let Some(m) = &s.mqtt
+                            && m.running()
+                        {
                             m.publish_machines(&s.status_for("", None));
                         }
                     }
@@ -543,8 +546,10 @@ struct State {
     mqtt: Option<mqtt_site::SiteMqtt>,
     /// The shared front's per-control sequence numbers over HTTP (`crate::front`).
     http_seq: Mutex<web::events::Sequencer>,
-    /// The status's version, and the hash of the status it was given for.
-    status_seen: Mutex<(u64, u64)>,
+    /// The status's version, the hash of the status it was given for (without its
+    /// running numbers), the site's part of the status as it was then, and when
+    /// (`status.rs`).
+    status_seen: Mutex<(u64, u64, serde_json::Value, std::time::Instant)>,
     /// The site's part of the status last made, when, and its version (`status.rs`).
     status_cache: Mutex<Option<(std::time::Instant, serde_json::Value, u64)>>,
 }

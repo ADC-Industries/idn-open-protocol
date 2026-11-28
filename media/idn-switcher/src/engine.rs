@@ -424,6 +424,9 @@ struct Slot {
     /// When it was last in use (the frame clock marks it each frame it is): it receives
     /// until [`SwitcherConfig::idle_after`] past that.
     used_at: Mutex<Option<Instant>>,
+    /// Notified (with `used_at`'s lock) when it comes into use, is kept active, or stops:
+    /// an unused network input's worker sleeps on it.
+    use_changed: Condvar,
     /// It receives now (a network input: its connection is open).
     active: AtomicBool,
     /// Its newest picture shrunk for the multiview's scene tiles, for the count and size
@@ -498,6 +501,11 @@ struct Shared {
     title_pictures: Mutex<BTreeMap<String, Arc<Frame>>>,
     /// Timers, by name (§S.19).
     timers: Mutex<BTreeMap<String, Timer>>,
+    /// Counts the timers' seconds moving on (a running timer's or an until timer's), raised
+    /// with the state's lock held and `changed` notified. Part of the public version, not
+    /// of the state's own (`state_version`): a countdown's tick doesn't make the watchers
+    /// that act on real changes build the state again.
+    timer_ticks: AtomicU64,
     /// Titles' data, by the title's id (§S.20).
     title_data: Mutex<BTreeMap<u32, DataRun>>,
     /// Cameras' control, by the camera input's id (§S.21).
@@ -655,9 +663,12 @@ impl Switcher {
         *self.shared.on_stinger.lock_ok() = Some(Arc::new(f));
     }
 
-    /// The state's version: it grows with every change.
+    /// The state's version: it grows with every change, the timers' seconds moving on
+    /// included (a UI showing a countdown redraws on it). The real changes alone:
+    /// [`state_version`](Self::state_version).
     pub fn version(&self) -> u64 {
-        self.shared.state.lock_ok().version
+        let s = self.shared.state.lock_ok();
+        s.version + self.shared.timer_ticks.load(Ordering::Relaxed)
     }
 }
 
@@ -689,6 +700,7 @@ impl Drop for Switcher {
         let slots: Vec<Arc<Slot>> = self.shared.inputs.lock_ok().values().cloned().collect();
         for s in &slots {
             s.stop.store(true, Ordering::Relaxed);
+            s.wake_unused();
         }
         for s in slots {
             let t = s.thread.lock_ok().take();

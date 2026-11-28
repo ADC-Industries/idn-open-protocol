@@ -318,9 +318,15 @@ pub(super) fn titles_tick(sh: &Arc<Shared>) {
                 let _ = draw_title(sh, &slot, &title);
             }
         }
-        if changed || !events.is_empty() {
+        if !events.is_empty() {
             let mut s = sh.state.lock_ok();
             bump(&mut s, &sh.changed);
+        } else if changed {
+            // Only the timers' seconds moved: counted on their own (`timer_ticks`), which
+            // moves the public version but not the state version of real changes.
+            let _s = sh.state.lock_ok();
+            sh.timer_ticks.fetch_add(1, Ordering::Relaxed);
+            sh.changed.notify_all();
         }
     }
 }

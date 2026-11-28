@@ -3,8 +3,8 @@
 //! y down; triggers 0–32767). Linux reads the pads' event devices (the account needs to
 //! read /dev/input, as games do); Windows reads XInput's four.
 
-use idn_common::sync::LockOk as _;
 use crate::receive::Link;
+use idn_common::sync::LockOk as _;
 use idn_open_protocol::remote::Control;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -29,14 +29,19 @@ pub fn start(link: Arc<Link>) {
                 }
                 false
             };
-            if let Err(e) = run(send) {
+            // Whether the source takes control now (Windows asks the pads slowly while not).
+            let active = || link.controllable.load(Ordering::Relaxed);
+            if let Err(e) = run(send, active) {
                 eprintln!("idn-display: gamepads: {e}");
             }
         });
 }
 
 #[cfg(target_os = "linux")]
-fn run(send: impl Fn(usize, u32, [i16; 6]) -> bool) -> std::io::Result<()> {
+fn run(
+    send: impl Fn(usize, u32, [i16; 6]) -> bool,
+    _active: impl Fn() -> bool,
+) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
     use std::time::{Duration, Instant};
 
@@ -126,7 +131,9 @@ fn run(send: impl Fn(usize, u32, [i16; 6]) -> bool) -> std::io::Result<()> {
     }
 
     let mut pads: Vec<Option<Pad>> = (0..4).map(|_| None).collect();
-    let mut scanned = Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now);
+    let mut scanned = Instant::now()
+        .checked_sub(Duration::from_secs(10))
+        .unwrap_or_else(Instant::now);
     loop {
         // New pads, every two seconds.
         if scanned.elapsed() >= Duration::from_secs(2) {
@@ -254,7 +261,10 @@ fn run(send: impl Fn(usize, u32, [i16; 6]) -> bool) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-fn run(send: impl Fn(usize, u32, [i16; 6]) -> bool) -> std::io::Result<()> {
+fn run(
+    send: impl Fn(usize, u32, [i16; 6]) -> bool,
+    active: impl Fn() -> bool,
+) -> std::io::Result<()> {
     use std::time::{Duration, Instant};
     use windows::Win32::UI::Input::XboxController::{
         XINPUT_GAMEPAD_BUTTON_FLAGS, XINPUT_STATE, XInputGetState,
@@ -273,7 +283,9 @@ fn run(send: impl Fn(usize, u32, [i16; 6]) -> bool) -> std::io::Result<()> {
         sent: Option<(u32, [i16; 6])>,
     }
     let mut pads = [Slot::default(); 4];
-    let mut scanned = Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now);
+    let mut scanned = Instant::now()
+        .checked_sub(Duration::from_secs(10))
+        .unwrap_or_else(Instant::now);
     loop {
         // Unplugged slots are slow to ask: every two seconds.
         let scan = scanned.elapsed() >= Duration::from_secs(2);
@@ -329,12 +341,18 @@ fn run(send: impl Fn(usize, u32, [i16; 6]) -> bool) -> std::io::Result<()> {
                 pad.sent = send(n, buttons, axes).then_some((buttons, axes));
             }
         }
-        // XInput is asked, not told: 250 times a second.
-        std::thread::sleep(Duration::from_millis(4));
+        // XInput is asked, not told: 250 times a second while a pad is plugged in and the
+        // source takes control; else twice a second (a pad plugged in is still seen within
+        // the 2 s scan, and its state sent once control comes back).
+        let busy = pads.iter().any(|p| p.on) && active();
+        std::thread::sleep(Duration::from_millis(if busy { 4 } else { 500 }));
     }
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn run(_send: impl Fn(usize, u32, [i16; 6]) -> bool) -> std::io::Result<()> {
+fn run(
+    _send: impl Fn(usize, u32, [i16; 6]) -> bool,
+    _active: impl Fn() -> bool,
+) -> std::io::Result<()> {
     Err(std::io::Error::other("not on this system yet"))
 }

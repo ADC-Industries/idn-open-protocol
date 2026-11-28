@@ -374,10 +374,22 @@ mod imp {
         ok
     }
 
+    /// A helper that ran at least this long before it ended is started again after the
+    /// shortest wait.
+    const RAN_LONG: Duration = Duration::from_secs(30);
+
     fn supervise(stop: &AtomicBool, cmdline: &str) {
+        use std::time::Instant;
         // (session, desktop, launched with a user's token, the helper)
         let mut current: Option<(u32, String, bool, Child)> = None;
+        let mut started = Instant::now();
         let mut desktop = String::from("Default");
+        // A helper that ends by itself (or won't start) is started again after a wait
+        // that grows while it keeps ending soon: 1 s up to a minute. The wait holds for
+        // the same session, desktop and user; any change starts one at once.
+        let mut waits =
+            idn_common::backoff::Backoff::new(Duration::from_secs(1), Duration::from_secs(60));
+        let mut not_before: Option<(Instant, (u32, String, bool))> = None;
         while !stop.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_secs(1));
             let Some(session) = active_console_session() else {
@@ -404,15 +416,46 @@ mod imp {
                 None => true,
             };
             if restart {
+                let here = (session, desktop.clone(), user);
+                let ran = started.elapsed();
+                if current.is_some() && ran >= RAN_LONG {
+                    waits.reset();
+                }
+                // Ended by itself, where it was started.
+                if let Some((s, d, u, c)) = &current
+                    && (*s, d.as_str(), *u) == (session, desktop.as_str(), user)
+                {
+                    let wait = waits.next();
+                    idn_open_protocol::log::log(&format!(
+                        "session helper: ended (exit code {}) after {} s; started again in {} s",
+                        c.exit_code()
+                            .map_or("unknown".to_owned(), |c| c.to_string()),
+                        ran.as_secs(),
+                        wait.as_secs()
+                    ));
+                    not_before = Some((Instant::now() + wait, here.clone()));
+                }
                 current = None;
+                if not_before
+                    .as_ref()
+                    .is_some_and(|(t, k)| *k == here && Instant::now() < *t)
+                {
+                    continue;
+                }
+                not_before = None;
                 match launch_in_session(session, cmdline, &desktop) {
-                    Ok(child) => current = Some((session, desktop.clone(), user, child)),
+                    Ok(child) => {
+                        current = Some((session, desktop.clone(), user, child));
+                        started = Instant::now();
+                    }
                     Err(e) => {
+                        // A failing launch waits too, so that it doesn't spin.
+                        let wait = waits.next();
                         idn_open_protocol::log::log(&format!(
-                            "session helper: couldn't start on {desktop} (session {session}): {e}"
+                            "session helper: couldn't start on {desktop} (session {session}): {e}; trying again in {} s",
+                            wait.as_secs()
                         ));
-                        // Wait a little so a failing launch doesn't spin.
-                        std::thread::sleep(Duration::from_secs(2));
+                        not_before = Some((Instant::now() + wait, here));
                     }
                 }
             }

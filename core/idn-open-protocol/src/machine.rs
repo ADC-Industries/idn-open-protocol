@@ -147,13 +147,35 @@ fn futex_wake(word: &AtomicU32) {
     }
 }
 
-/// Elsewhere: a look every millisecond (Windows' WaitOnAddress works within one process
-/// only).
+/// Elsewhere: a look at the word, every millisecond at first and less often the longer
+/// it stays unchanged ([`idle_step`]); each call starts at 1 ms again, so a reader that
+/// was just woken stays quick. Windows' WaitOnAddress works within one process only; a
+/// named event rung by the writer would let the reader sleep until rung.
 #[cfg(not(target_os = "linux"))]
 fn futex_wait(word: &AtomicU32, was: u32, timeout: Duration) {
-    let end = std::time::Instant::now() + timeout;
-    while word.load(Ordering::Acquire) == was && std::time::Instant::now() < end {
-        std::thread::sleep(Duration::from_millis(1));
+    let start = std::time::Instant::now();
+    let end = start + timeout;
+    loop {
+        let now = std::time::Instant::now();
+        if word.load(Ordering::Acquire) != was || now >= end {
+            return;
+        }
+        std::thread::sleep(idle_step(now - start).min(end - now));
+    }
+}
+
+/// How long the polling wait sleeps after the word has stayed unchanged for `idle`: 1 ms
+/// for the first 50 ms (longer than a picture's interval down to 20 fps, so a picture-only
+/// ring isn't held back), then 2 ms, and 4 ms after 200 ms of quiet.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn idle_step(idle: Duration) -> Duration {
+    let ms = Duration::from_millis;
+    if idle < ms(50) {
+        ms(1)
+    } else if idle < ms(200) {
+        ms(2)
+    } else {
+        ms(4)
     }
 }
 
@@ -847,6 +869,22 @@ pub fn is_this_machine(ip: std::net::IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_step_starts_short_and_backs_off_to_4_ms() {
+        let ms = Duration::from_millis;
+        assert_eq!(idle_step(Duration::ZERO), ms(1));
+        assert_eq!(idle_step(ms(49)), ms(1));
+        assert_eq!(idle_step(ms(100)), ms(2));
+        assert_eq!(idle_step(ms(250)), ms(4));
+        assert_eq!(idle_step(Duration::from_secs(5)), ms(4));
+        let mut last = Duration::ZERO;
+        for i in 0..200 {
+            let step = idle_step(ms(i));
+            assert!(step >= last, "never shorter while nothing changes");
+            last = step;
+        }
+    }
 
     fn picture(seq: u64) -> Shared {
         Shared {

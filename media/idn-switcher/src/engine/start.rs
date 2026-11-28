@@ -103,6 +103,7 @@ impl Switcher {
             title_texts: Mutex::new(BTreeMap::new()),
             title_pictures: Mutex::new(BTreeMap::new()),
             timers: Mutex::new(BTreeMap::new()),
+            timer_ticks: AtomicU64::new(0),
             title_data: Mutex::new(BTreeMap::new()),
             cameras: Mutex::new(BTreeMap::new()),
             views: Mutex::new(BTreeMap::new()),

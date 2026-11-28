@@ -100,6 +100,10 @@ fn runtime() -> tokio::runtime::Runtime {
 fn main() {
     // Freed memory given back to the system, not held by glibc (idn_common::memory).
     let _ = idn_common::memory::tune();
+    // The library's own lines (Voice's listeners, trust, discovery) to stderr, beside this
+    // program's, however it is started (as a Windows service too: set again there, the
+    // first call stays).
+    idn_open_protocol::log::set_logger(|m| eprintln!("{m}"));
     settings_file();
     // `healthcheck`: for Docker's HEALTHCHECK (the image has no curl): 0 if /healthz
     // answers.
@@ -179,6 +183,9 @@ fn service_main(_args: Vec<std::ffi::OsString>) {
     };
     use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
     idn_open_protocol::diag::init("idn-site-manager-industrial");
+    // The library's own lines (Voice's listeners, trust, discovery) to stderr, beside
+    // this program's: without a logger they were dropped.
+    idn_open_protocol::log::set_logger(|m| eprintln!("{m}"));
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let stop_tx = std::sync::Mutex::new(Some(stop_tx));
     let handler = move |c| match c {

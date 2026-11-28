@@ -289,6 +289,27 @@ serial numbers (it may wrap), and catches up on a backlog by skipping silence an
 playing at up to 1.25×. At most 32 talkers' streams are decoded at once (the one quiet
 longest goes).
 
+## Example: a command-line handset
+
+`examples/handset.rs` is a handset with no audio device, for lab checks and as a usage
+example of the Rust API:
+
+```sh
+cargo run -p idn-voice-client --example handset -- handset.json \
+    [--channel N] [--talk SECONDS] [--every SECONDS] [--tone HZ | --wav FILE] \
+    [--out FILE.wav] [--for SECONDS]
+```
+
+`handset.json` is the configuration above. It connects, joins `--channel` (or stays in
+the channels the server puts it in, talking in the first it may talk in), and every
+`--every` seconds (10) talks for `--talk` seconds (3): a sine tone at -12 dBFS (`--tone`,
+440 Hz) or a WAV file looped (`--wav`: 16-bit PCM, mono or stereo, at a microphone rate),
+pushed in 20 ms pieces in real time. The speaker is pulled in real time on its own
+thread; `--out` writes what is heard (16-bit mono 48 kHz, written every second, so a
+killed run leaves a valid file). It prints each event on one line with the time (UTC),
+the loudness heard each second, and `stats()` every 5 s. `q` and Enter signs off
+(`close`); so does `--for`.
+
 ## Tests
 
 `cargo nextest run -p idn-voice-client`: framing, the jitter buffer, the configuration,

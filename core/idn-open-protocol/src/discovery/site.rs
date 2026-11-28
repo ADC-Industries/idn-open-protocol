@@ -124,6 +124,11 @@ impl SiteAnnouncer {
         for i in &ifaces {
             let _ = sock.join_multicast_v4(&MDNS_GROUP, i);
         }
+        // The loop waits in recv_from: blocking with a 100 ms timeout (udp_socket's are
+        // non-blocking, for the browser's poll; here a would-block came back at once and
+        // the thread spun a core).
+        sock.set_nonblocking(false)?;
+        sock.set_read_timeout(Some(Duration::from_millis(100)))?;
         let stop = Arc::new(AtomicBool::new(false));
         let (s2, ca) = (stop.clone(), ca.to_owned());
         let thread = std::thread::Builder::new()
@@ -213,6 +218,7 @@ fn announce_loop(
             // (A read timeout, as Windows tells it too: nothing came, no extra wait; bug
             // run B.)
             Err(e) if crate::transport::is_poll_timeout(&e) => {}
+            Err(e) if idn_common::backoff::retry_at_once(&e) => {}
             Err(_) => std::thread::sleep(Duration::from_millis(200)),
         }
     }

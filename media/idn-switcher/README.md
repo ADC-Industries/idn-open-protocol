@@ -55,7 +55,9 @@ scenes go on the buses (an input is refused: put it in a scene). Input ids are o
 
 **State and change events.** The engine keeps a monotonic `version()`. `wait_change(after,
 timeout)` blocks until the version passes `after` (or the timeout), so a UI thread
-waits-reads-redraws without polling. `state()` is a `serde_json::Value` snapshot (the shape
+waits-reads-redraws without polling; a running timer's seconds count as changes.
+`state_version()` and `wait_state_change()` count only real changes (for a watcher that
+saves or publishes the state rather than drawing timers). `state()` is a `serde_json::Value` snapshot (the shape
 the program's `GET /api/v1/state` returns); `multiview_jpeg()` is the multiview.
 
 **Scenes** (§S.12). `add_input(label, Source::Scene)` makes a scene — what goes on the

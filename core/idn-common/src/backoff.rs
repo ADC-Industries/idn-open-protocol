@@ -79,6 +79,22 @@ impl Backoff {
     }
 }
 
+/// Whether a socket's receive error passes on its own, so the receive loop may try again
+/// at once: its read timeout, an interruption, or what Windows reports for one datagram
+/// on a UDP socket (a reset after an ICMP "port unreachable"; WSAEMSGSIZE for one larger
+/// than the buffer, truncated). Any other error may last (the socket broken, the
+/// interface gone), and a loop that retries it at once spins: it waits a little first.
+pub fn retry_at_once(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind as K;
+    /// WSAEMSGSIZE (an oversized datagram) and WSAENETRESET (a datagram's TTL ran out on
+    /// the way): one datagram each, as WSAECONNRESET is.
+    const ONE_OFF: [i32; 2] = [10040, 10052];
+    matches!(
+        e.kind(),
+        K::WouldBlock | K::TimedOut | K::Interrupted | K::ConnectionReset
+    ) || (cfg!(windows) && e.raw_os_error().is_some_and(|c| ONE_OFF.contains(&c)))
+}
+
 /// A number in [0, 1), random enough to spread retries (not for keys): the standard
 /// library's per-process random hasher keys, fresh each call.
 fn unit_random() -> f64 {
@@ -94,6 +110,27 @@ mod tests {
     use super::*;
 
     const MS: fn(u64) -> Duration = Duration::from_millis;
+
+    #[test]
+    fn timeouts_retry_at_once_lasting_errors_wait() {
+        use std::io::{Error, ErrorKind as K};
+        for k in [
+            K::WouldBlock,
+            K::TimedOut,
+            K::Interrupted,
+            K::ConnectionReset,
+        ] {
+            assert!(retry_at_once(&Error::from(k)), "{k:?}");
+        }
+        for k in [
+            K::NotConnected,
+            K::InvalidInput,
+            K::Other,
+            K::AddrNotAvailable,
+        ] {
+            assert!(!retry_at_once(&Error::from(k)), "{k:?}");
+        }
+    }
 
     #[test]
     fn doubles_up_to_the_most_then_starts_again() {

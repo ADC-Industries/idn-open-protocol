@@ -22,6 +22,7 @@ impl NodeCore {
             self.log(&format!(
                 "{app} crashed: report {name} kept for the Site Manager"
             ));
+            self.crash_kept.store(true, Ordering::Relaxed);
         }
         // At most the newest 200, by when they were written (by name, the alphabetically
         // first programs' went first, a new report deleted at once; bug run 2026-11-25).
@@ -53,9 +54,20 @@ impl NodeCore {
         Ok(())
     }
 
+    /// Whether a crash report was kept since the last call.
+    pub(super) fn crash_kept(&self) -> bool {
+        self.crash_kept.swap(false, Ordering::Relaxed)
+    }
+
     /// Crash reports not yet sent to the Site Manager (`all`: also those sent in the last
-    /// day, sent again on a new connection in case the last one dropped them).
-    pub(super) fn crashes_to_send(&self, all: bool) -> Vec<PathBuf> {
+    /// day, sent again on a new connection in case the last one dropped them). `sent`:
+    /// those sent since the Node started, by name, with when (a report whose `.sent`
+    /// couldn't be written is not sent again at each look).
+    pub(super) fn crashes_to_send(
+        &self,
+        all: bool,
+        sent: &BTreeMap<String, Instant>,
+    ) -> Vec<PathBuf> {
         let mut v: Vec<PathBuf> = std::fs::read_dir(self.crashes_dir())
             .into_iter()
             .flatten()
@@ -63,18 +75,12 @@ impl NodeCore {
             .map(|e| e.path())
             .filter(|p| p.extension().is_some_and(|e| e == "txt"))
             .filter(|p| {
-                let sent = p.with_extension("sent");
-                !sent.exists()
-                    || (all
-                        && std::fs::metadata(&sent)
-                            .and_then(|m| m.modified())
-                            .is_ok_and(|t| {
-                                t.elapsed().is_ok_and(|d| d < Duration::from_secs(86_400))
-                            }))
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                to_send(all, sent.get(name).copied(), &p.with_extension("sent"))
             })
             .collect();
         v.sort();
-        v.truncate(20);
+        v.truncate(super::background::CRASHES_AT_ONCE);
         v
     }
 
@@ -127,5 +133,47 @@ impl NodeCore {
             );
         }
         out
+    }
+}
+
+/// A day: reports sent within it are sent again on a new connection.
+const RESEND_WITHIN: Duration = Duration::from_secs(86_400);
+
+/// Whether a report is to be sent: never sent (no `.sent` file, not sent since the Node
+/// started); with `all`, also one sent within the last day.
+fn to_send(all: bool, sent_here: Option<Instant>, sent_file: &Path) -> bool {
+    let file = || std::fs::metadata(sent_file).and_then(|m| m.modified());
+    if !all {
+        return sent_here.is_none() && !sent_file.exists();
+    }
+    match sent_here {
+        Some(t) => t.elapsed() < RESEND_WITHIN,
+        None => match file() {
+            Ok(t) => t.elapsed().is_ok_and(|d| d < RESEND_WITHIN),
+            Err(_) => true,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A report sent since the start is not sent again at the next look, even with its
+    /// `.sent` file missing (it couldn't be written); on a new connection it is, within
+    /// the day.
+    #[test]
+    fn a_report_sent_is_not_sent_at_each_look() {
+        let dir = std::env::temp_dir().join(format!("idn-crash-send-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sent_file = dir.join("crash-x-20261127-101010-1.sent");
+        let _ = std::fs::remove_file(&sent_file);
+        assert!(to_send(false, None, &sent_file));
+        assert!(!to_send(false, Some(Instant::now()), &sent_file));
+        assert!(to_send(true, Some(Instant::now()), &sent_file));
+        std::fs::write(&sent_file, b"").unwrap();
+        assert!(!to_send(false, None, &sent_file));
+        assert!(to_send(true, None, &sent_file));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

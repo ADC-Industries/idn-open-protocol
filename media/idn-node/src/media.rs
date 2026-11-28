@@ -459,6 +459,20 @@ impl Media {
         }
     }
 
+    /// As [`Self::set_state`], only while it still says "receiving".
+    fn set_state_if_receiving(&self, peer: &str, id: &str, state: String) {
+        if let Some(t) = self
+            .transfers
+            .lock_ok()
+            .iter_mut()
+            .rev()
+            .find(|t| t.way == "in" && t.peer == peer && t.id == id)
+            && t.state == "receiving"
+        {
+            t.state = state;
+        }
+    }
+
     /// Sets the state of file `id` this Node offered to the box `fp` (not taken: "refused",
     /// "failed: …").
     pub fn set_out_state(&self, id: &str, fp: &str, state: String) {
@@ -503,6 +517,26 @@ impl Media {
 struct Counting {
     inner: PathSink,
     done: Arc<AtomicU64>,
+    /// To mark the transfer failed if it ends without a result (below).
+    media: Weak<Media>,
+    peer: String,
+    id: String,
+    /// The file was finished (checked and in place).
+    finished: bool,
+}
+
+impl Drop for Counting {
+    /// A transfer whose task ended with neither the file finished nor an error told (it
+    /// was stopped, or failed where nothing reported it) shows "failed: interrupted",
+    /// not "receiving" for ever. A state already told isn't touched.
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        if let Some(m) = self.media.upgrade() {
+            m.set_state_if_receiving(&self.peer, &self.id, "failed: interrupted".into());
+        }
+    }
 }
 
 impl FileSink for Counting {
@@ -524,7 +558,9 @@ impl FileSink for Counting {
         self.inner.write(data)
     }
     fn finish(&mut self, info: &FileInfo) -> io::Result<()> {
-        self.inner.finish(info)
+        self.inner.finish(info)?;
+        self.finished = true;
+        Ok(())
     }
 }
 
@@ -643,6 +679,10 @@ impl Handler for Media {
         Some(Box::new(Counting {
             inner: PathSink::new(path),
             done,
+            media: self.me.clone(),
+            peer: from.name.clone(),
+            id: offer.id.clone(),
+            finished: false,
         }))
     }
 

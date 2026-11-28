@@ -94,6 +94,34 @@ extern "C" fn on_signal(sig: libc::c_int) {
     }
 }
 
+/// For a command-line program the user (or a script) stops with SIGINT or SIGTERM: sets
+/// either signal back to its default if this process was started with it ignored (a
+/// shell starts a script's background jobs with SIGINT ignored; [`install`] then leaves
+/// it alone, and the program couldn't be stopped with it), then [`install`]s. Not for
+/// services or programs embedded elsewhere: there, an ignored signal is meant.
+#[cfg(unix)]
+pub fn install_for_command() -> Vec<i32> {
+    for sig in [libc::SIGINT, libc::SIGTERM] {
+        // SAFETY: a sigaction struct of our own (zeroed is valid) to read the current
+        // disposition into; only an ignored signal is set back to the default.
+        unsafe {
+            let mut old: libc::sigaction = std::mem::zeroed();
+            if libc::sigaction(sig, std::ptr::null(), &mut old) == 0
+                && old.sa_sigaction == libc::SIG_IGN
+            {
+                libc::signal(sig, libc::SIG_DFL);
+            }
+        }
+    }
+    install()
+}
+
+/// As [`install`] (no inherited ignore of this kind here).
+#[cfg(not(unix))]
+pub fn install_for_command() -> Vec<i32> {
+    install()
+}
+
 /// Handles SIGINT (Ctrl+C) and SIGTERM (service stop): sends every output's stop
 /// notices ([`run_hooks`]), then exits the way the signal would have (status 130 or
 /// 143). Leaves alone any of the two signals your application already handles. Returns

@@ -738,17 +738,96 @@ pub struct Soundcheck {
 /// Read ahead, at most, in seconds (in blocks: by the block's size).
 const AHEAD_SECS: usize = 2;
 
+/// The soundcheck's reader: blocks read ahead into `st`'s queue, up to `ahead`; then (or
+/// at the end) it sleeps until the desk takes a block, a transport command comes, or
+/// `stop`.
+fn read_ahead(
+    mut session: Session,
+    st: &(Mutex<PlayState>, Condvar),
+    stop: &AtomicBool,
+    block: usize,
+    inputs: usize,
+    ahead: usize,
+) {
+    let (lock, cv) = st;
+    // Back at the start for a loop, nothing read since: a second end there means nothing
+    // to play (a recording with no frames), ended rather than going round again at once.
+    let mut wrapped = false;
+    loop {
+        let mut g = lock.lock_ok();
+        // (Checked under the lock: `Drop` sets it under the lock too, so its wakeup
+        // isn't missed.)
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Some(to) = g.locate.take() {
+            g.queue.clear();
+            g.read_at = to;
+            g.ended = false;
+            wrapped = false;
+            if let Err(e) = session.seek(to) {
+                g.error = Some(e.to_string());
+            }
+        }
+        if g.queue.len() >= ahead || g.ended {
+            // Woken by `next` taking a block, `transport` and `Drop`; the timeout only a
+            // safety net.
+            let _ = cv.wait_timeout(g, Duration::from_secs(1));
+            continue;
+        }
+        let at = g.read_at;
+        drop(g);
+        let r = session.read(block, inputs);
+        let mut g = lock.lock_ok();
+        // A locate meanwhile: this block is from before it.
+        if g.locate.is_some() || g.read_at != at {
+            continue;
+        }
+        match r {
+            Ok(Some(b)) => {
+                wrapped = false;
+                g.queue.push_back((at, b));
+                g.read_at = at + block as u64;
+            }
+            Ok(None) if g.looped && !wrapped => {
+                // Round to the start, what is read ahead kept: a locate cleared it, the
+                // last ~2 s never played and an underrun at each round.
+                match session.seek(0) {
+                    Ok(()) => {
+                        g.read_at = 0;
+                        wrapped = true;
+                    }
+                    Err(e) => {
+                        g.error = Some(e.to_string());
+                        g.ended = true;
+                    }
+                }
+            }
+            Ok(None) => g.ended = true,
+            Err(e) => {
+                g.error = Some(e.to_string());
+                g.ended = true;
+            }
+        }
+    }
+}
+
 impl Soundcheck {
     /// Opens recording `dir` to play `block`-frame blocks to a desk of `inputs` inputs;
     /// paused at its start.
     pub fn open(dir: &Path, block: usize, inputs: usize, rate: u32) -> io::Result<Soundcheck> {
         let ahead = (AHEAD_SECS * rate as usize / block.max(1)).max(16);
-        let mut session = Session::open(dir)?;
+        let session = Session::open(dir)?;
         if session.rate != rate {
             return Err(idn_common::err::invalid_data(format!(
                 "recorded at {} Hz; the desk runs at {rate}",
                 session.rate
             )));
+        }
+        if session.frames == 0 {
+            return Err(idn_common::err::invalid_data(
+                "the recording is empty: its files hold no audio",
+            ));
         }
         let st = Arc::new((
             Mutex::new(PlayState {
@@ -769,55 +848,7 @@ impl Soundcheck {
         let (s2, stop2) = (st.clone(), stop.clone());
         let thread = std::thread::Builder::new()
             .name("idn-mixer-soundcheck".into())
-            .spawn(move || {
-                let (lock, cv) = &*s2;
-                while !stop2.load(Ordering::Relaxed) {
-                    let mut g = lock.lock_ok();
-                    if let Some(to) = g.locate.take() {
-                        g.queue.clear();
-                        g.read_at = to;
-                        g.ended = false;
-                        if let Err(e) = session.seek(to) {
-                            g.error = Some(e.to_string());
-                        }
-                    }
-                    if g.queue.len() >= ahead || g.ended {
-                        let _ = cv.wait_timeout(g, Duration::from_millis(50));
-                        continue;
-                    }
-                    let at = g.read_at;
-                    drop(g);
-                    let r = session.read(block, inputs);
-                    let mut g = lock.lock_ok();
-                    // A locate meanwhile: this block is from before it.
-                    if g.locate.is_some() || g.read_at != at {
-                        continue;
-                    }
-                    match r {
-                        Ok(Some(b)) => {
-                            g.queue.push_back((at, b));
-                            g.read_at = at + block as u64;
-                        }
-                        Ok(None) if g.looped => {
-                            // Round to the start, what is read ahead kept: a locate cleared
-                            // it, the last ~2 s never played and an underrun at each round
-                            // (deep bug run 2026-11-09).
-                            match session.seek(0) {
-                                Ok(()) => g.read_at = 0,
-                                Err(e) => {
-                                    g.error = Some(e.to_string());
-                                    g.ended = true;
-                                }
-                            }
-                        }
-                        Ok(None) => g.ended = true,
-                        Err(e) => {
-                            g.error = Some(e.to_string());
-                            g.ended = true;
-                        }
-                    }
-                }
-            })?;
+            .spawn(move || read_ahead(session, &s2, &stop2, block, inputs, ahead))?;
         Ok(Soundcheck {
             name: dir
                 .file_name()
@@ -915,7 +946,11 @@ impl Soundcheck {
 
 impl Drop for Soundcheck {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        {
+            // Under the lock: the reader checks it under the lock before it sleeps.
+            let _g = self.st.0.lock_ok();
+            self.stop.store(true, Ordering::Relaxed);
+        }
         self.st.1.notify_all();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -1039,6 +1074,58 @@ mod tests {
         assert!((b.iter().find(|(k, _)| *k == 2).unwrap().1[0] - 0.48).abs() < 1e-6);
         // Wrong rate: refused.
         assert!(Soundcheck::open(&folder, 96, 8, 44_100).is_err());
+    }
+
+    /// A recording with no frames: refused to play, and its reader, looping, ends there
+    /// and sleeps rather than going round at once for ever.
+    #[test]
+    fn an_empty_recording_ends_rather_than_spinning() {
+        let root = dir("empty");
+        let mut w = WavOut::create(&root.join("01 Vox.wav"), 48_000).unwrap();
+        w.sync().unwrap();
+        drop(w);
+        let err = Soundcheck::open(&root, 96, 4, 48_000)
+            .err()
+            .expect("refused");
+        assert!(err.to_string().contains("empty"), "{err}");
+        let session = Session::open(&root).unwrap();
+        assert_eq!(session.frames, 0);
+        let st = Arc::new((
+            Mutex::new(PlayState {
+                playing: true,
+                looped: true,
+                queue: VecDeque::new(),
+                read_at: 0,
+                locate: None,
+                played: 0,
+                underruns: 0,
+                ended: false,
+                error: None,
+            }),
+            Condvar::new(),
+        ));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (s2, stop2) = (st.clone(), stop.clone());
+        let t = std::thread::spawn(move || read_ahead(session, &s2, &stop2, 96, 4, 16));
+        let mut ended = false;
+        for _ in 0..200 {
+            if st.0.lock_ok().ended {
+                ended = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            ended,
+            "the looping reader ends on a recording with no frames"
+        );
+        assert!(st.0.lock_ok().queue.is_empty());
+        {
+            let _g = st.0.lock_ok();
+            stop.store(true, Ordering::Relaxed);
+        }
+        st.1.notify_all();
+        t.join().unwrap();
     }
 
     /// A folder of other WAVs (16 and 24-bit PCM, stereo): its channels to inputs in order.

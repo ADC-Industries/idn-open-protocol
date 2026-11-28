@@ -68,7 +68,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
 /// The argument that makes a program a captions worker ([`serve_if_asked`]).
@@ -543,6 +543,9 @@ pub(crate) struct Worker {
     /// From the thread reading its output (in a mutex only so the engine stays `Sync`, as
     /// it was with whisper in-process; only ever reached through `&mut self`).
     rx: Mutex<mpsc::Receiver<io::Result<Frame>>>,
+    /// When its output ended (set by the thread reading it): a worker killed ends it at
+    /// once, so this is when it died, however late that is noticed.
+    ended_at: Arc<OnceLock<Instant>>,
     next_id: u64,
     pub program: PathBuf,
 }
@@ -578,6 +581,8 @@ impl Worker {
         };
         let (tx, to_worker) = mpsc::channel::<Vec<u8>>();
         let (from_worker, rx) = mpsc::channel::<io::Result<Frame>>();
+        let ended_at = Arc::new(OnceLock::new());
+        let output_ended = ended_at.clone();
         let writer = std::thread::Builder::new()
             .name("captions-worker-in".into())
             .spawn(move || {
@@ -598,8 +603,12 @@ impl Worker {
                                     break;
                                 }
                             }
-                            Ok(None) => break,
+                            Ok(None) => {
+                                let _ = output_ended.set(Instant::now());
+                                break;
+                            }
                             Err(e) => {
+                                let _ = output_ended.set(Instant::now());
                                 let _ = from_worker.send(Err(e));
                                 break;
                             }
@@ -618,9 +627,31 @@ impl Worker {
             child: Some(child),
             tx: Some(tx),
             rx: Mutex::new(rx),
+            ended_at,
             next_id: 1,
             program: program.to_owned(),
         })
+    }
+
+    /// When it died: when its output ended, else now (its death noticed another way).
+    fn died_at(&self) -> Instant {
+        self.ended_at.get().copied().unwrap_or_else(Instant::now)
+    }
+
+    /// Whether it has ended, without waiting: why, if so (it is stopped then). Frames
+    /// waiting are discarded: called only with no request outstanding, they are answers
+    /// given up on.
+    fn ended(&mut self) -> Option<String> {
+        loop {
+            match self.next_frame(Duration::ZERO) {
+                Got::Frame(_) => {}
+                Got::Nothing => return None,
+                Got::Dead(why) => {
+                    self.kill();
+                    return Some(why);
+                }
+            }
+        }
     }
 
     /// One look at its output, waiting at most `wait`.
@@ -1040,17 +1071,21 @@ impl Remote {
         }
     }
 
-    /// The worker ended (or couldn't be started): the next start after [`backoff`];
-    /// `up_since`: when the one that ended came up (long enough ago: the count afresh).
+    /// The worker ended (or couldn't be started) now: [`died_at`](Self::died_at).
     fn died(&mut self, why: &str, up_since: Option<Instant>) {
-        if up_since.is_some_and(|t| t.elapsed() >= BACKOFF_RESET) {
+        self.died_at(why, up_since, Instant::now());
+    }
+
+    /// The worker ended (or couldn't be started) at `at`: the next start [`backoff`] after
+    /// that, however late it was noticed; `up_since`: when the one that ended came up (up
+    /// [`BACKOFF_RESET`] or longer: the count afresh).
+    fn died_at(&mut self, why: &str, up_since: Option<Instant>, at: Instant) {
+        if up_since.is_some_and(|t| at.saturating_duration_since(t) >= BACKOFF_RESET) {
             self.deaths = 0;
         }
         self.deaths = self.deaths.saturating_add(1);
         let wait = backoff(self.deaths);
-        self.state = State::Down {
-            at: Instant::now() + wait,
-        };
+        self.state = State::Down { at: at + wait };
         self.why = format!(
             "captions: the worker isn't running ({why}); whisper waits for it (started again every {} s at most)",
             backoff(u32::MAX).as_secs()
@@ -1066,22 +1101,44 @@ impl Remote {
         );
     }
 
-    /// Its worker, once up: the state moved on without waiting (started when due, its
-    /// hello and its model's load looked for); why not, else.
+    /// The worker looked after without waiting ([`ready`](Self::ready)): one that ended is
+    /// noticed, and started again when due, between passes too.
+    pub fn tend(&mut self) {
+        let _ = self.ready();
+    }
+
+    /// Its worker, once up: the state moved on without waiting (an end looked for, started
+    /// when due, its hello and its model's load looked for); why not, else.
     fn ready(&mut self) -> Result<&mut Worker, String> {
         let now = Instant::now();
         match std::mem::replace(&mut self.state, State::Down { at: now }) {
-            s @ State::Up { .. } => self.state = s,
+            State::Up { mut w, since } => match w.ended() {
+                None => self.state = State::Up { w, since },
+                Some(why) => {
+                    let at = w.died_at();
+                    self.died_at(&why, Some(since), at);
+                }
+            },
             State::Down { at } if now < at => self.state = State::Down { at },
             State::Down { .. } => match Worker::spawn(&self.program, self.level) {
-                Ok(w) => self.state = State::Starting { w, since: now },
+                Ok(w) => {
+                    self.say(
+                        "starting",
+                        &format!(
+                            "captions: the worker {} is starting again",
+                            self.program.display()
+                        ),
+                    );
+                    self.state = State::Starting { w, since: now }
+                }
                 Err(why) => self.died(&why, None),
             },
             State::Starting { mut w, since } => match w.poll_hello(since) {
                 None => self.state = State::Starting { w, since },
                 Some(Err(why)) => {
+                    let at = w.died_at();
                     w.kill();
-                    self.died(&why, None);
+                    self.died_at(&why, None, at);
                 }
                 Some(Ok(())) => match w.send(load_header(&self.model, self.gpu), &[]) {
                     Ok(id) => self.state = State::Loading { w, id },
@@ -1119,7 +1176,10 @@ impl Remote {
                         ),
                     );
                 }
-                Some(Err(why)) => self.died(&why, None),
+                Some(Err(why)) => {
+                    let at = w.died_at();
+                    self.died_at(&why, None, at);
+                }
             },
         }
         match &mut self.state {
@@ -1178,11 +1238,11 @@ impl Remote {
                 Err(STOPPED.to_owned())
             }
             Err(Fail::Dead(why)) => {
-                let since = match &self.state {
-                    State::Up { since, .. } => Some(*since),
-                    _ => None,
+                let (since, at) = match &self.state {
+                    State::Up { w, since } => (Some(*since), w.died_at()),
+                    _ => (None, Instant::now()),
                 };
-                self.died(&why, since);
+                self.died_at(&why, since, at);
                 Err(self.why.clone())
             }
         }
@@ -1207,6 +1267,7 @@ mod tests {
                 child: None,
                 tx: Some(tx),
                 rx: Mutex::new(rx),
+                ended_at: Arc::new(OnceLock::new()),
                 next_id: 1,
                 program: PathBuf::from("fake"),
             };
@@ -1402,6 +1463,63 @@ mod tests {
         let secs: Vec<u64> = (0..7).map(|d| backoff(d).as_secs()).collect();
         assert_eq!(secs, [0, 1, 5, 30, 60, 60, 60]);
         assert_eq!(backoff(u32::MAX), Duration::from_secs(60));
+    }
+
+    /// A worker that ends while nothing is asked of it is noticed by a look alone (no
+    /// pass), and its next start is due on the schedule counted from its death, not from
+    /// when that was noticed: 1 s, then 5 s, 30 s, 60 s. Starts that fail count as deaths.
+    #[test]
+    fn a_worker_that_ends_between_passes_is_started_again_on_time() {
+        let (w, _sent, answers) = Worker::fake();
+        let since = Instant::now();
+        let mut r = Remote {
+            state: State::Up { w, since },
+            program: PathBuf::from("/nowhere/idn-captions-worker-missing"),
+            level: Priority::Low,
+            model: "/nowhere/ggml-base.en.bin".into(),
+            gpu: false,
+            timeout: Duration::from_secs(60),
+            deaths: 0,
+            why: String::new(),
+            said: "up".into(),
+            device: String::new(),
+            priority: Priority::Low,
+        };
+        r.tend();
+        assert!(matches!(r.state, State::Up { .. }), "alive: kept");
+        // It died 3 s before it was looked at.
+        let died = Instant::now() - Duration::from_secs(3);
+        if let State::Up { w, .. } = &r.state {
+            w.ended_at.set(died).unwrap();
+        }
+        drop(answers);
+        r.tend();
+        match r.state {
+            State::Down { at } => assert_eq!(at, died + Duration::from_secs(1)),
+            _ => panic!("not noticed"),
+        }
+        assert_eq!(r.deaths, 1);
+        assert!(r.why.contains("isn't running"), "{}", r.why);
+        // Due: started (this program can't be: a death), each next start further off.
+        for (deaths, wait) in [(2, 5), (3, 30), (4, 60), (5, 60)] {
+            let before = Instant::now();
+            r.tend();
+            assert_eq!(r.deaths, deaths);
+            let State::Down { at } = r.state else {
+                panic!("down");
+            };
+            let left = at.saturating_duration_since(before);
+            // (Counted from the failed start, a moment after `before`.)
+            assert!(
+                left <= Duration::from_secs(wait) + Duration::from_millis(200)
+                    && left + Duration::from_secs(2) > Duration::from_secs(wait),
+                "{deaths}: {left:?}"
+            );
+            // Not before it is due.
+            r.tend();
+            assert_eq!(r.deaths, deaths, "not started early");
+            r.state = State::Down { at: Instant::now() };
+        }
     }
 
     /// The worker programs: the one given alone, else the switch alone (off: none), else

@@ -46,7 +46,10 @@ programs_dir, place, … })`, then the services it names run from IDN's programs
 - **State:** `GET /api/v1/state` (the switcher, the desk, IDN Data, the display service,
   the Site Manager, the Node panel: `?after=VERSION` waits up to 20 s for a newer one; the
   Site Manager's and the Node's is their `GET /api/v1/status` with a `version`). Every
-  state carries a `version` that grows with every change.
+  state carries a `version` that grows with every change. In the Site Manager's and the
+  Node's pushed `state`, the live figures (uptime, CPU, clock offset, `last_seen`) refresh
+  about every 10 s rather than as they tick (their version moves then too); a `GET`
+  returns the current ones. The switcher's version moves each second while a timer runs.
 - **State schemas (2026-11-19):** `GET /api/v1/state_schema` (the desk, the switcher,
   the display service, the Site Manager (also its `status_schema`), the Node
   (`idn_node::panel_state::NodeStatus`)): the state's JSON

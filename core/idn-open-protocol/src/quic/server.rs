@@ -24,6 +24,9 @@ const MAX_CONNECTIONS: usize = 16;
 const MAX_PER_ADDRESS: usize = 4;
 /// Events waiting for the input; when it falls behind, flow control slows the senders.
 const EVENT_QUEUE: usize = 256;
+/// How long [`Server::poll`] waits for an event. Events are returned as soon as they
+/// arrive; this only bounds how often the caller gets to check for a stop.
+const POLL_WAIT: Duration = Duration::from_millis(100);
 
 /// Fixed bytes 4..15 of a stream token (§2.3.1).
 const TOKEN_TAIL: [u8; 12] = [
@@ -129,6 +132,9 @@ pub struct Server {
     endpoint: quinn::Endpoint,
     rx: tokio::sync::mpsc::Receiver<Event>,
     ids: StreamIds,
+    /// The endpoint stopped accepting and every connection has ended: no event will
+    /// come again.
+    ended: bool,
 }
 
 impl Server {
@@ -231,7 +237,12 @@ impl Server {
                 });
             }
         });
-        Ok(Server { endpoint, rx, ids })
+        Ok(Server {
+            endpoint,
+            rx,
+            ids,
+            ended: false,
+        })
     }
 
     /// The identifiers streams must open with: [`StreamIds::renew`] for a new session.
@@ -243,19 +254,34 @@ impl Server {
         self.endpoint.local_addr()
     }
 
-    /// Waits up to about 5 ms for something to happen; returns all that did.
+    /// Waits up to about 100 ms for something to happen; returns all that did, as soon as
+    /// the first arrives. Once the endpoint has ended ([`ended`](Self::ended)) it returns
+    /// nothing, after the same wait, so a loop around it does not spin.
     pub fn poll(&mut self) -> Vec<Event> {
         let mut out = Vec::new();
-        let first = super::runtime().block_on(async {
-            tokio::time::timeout(Duration::from_millis(5), self.rx.recv()).await
-        });
-        if let Ok(Some(e)) = first {
-            out.push(e);
-            while let Ok(e) = self.rx.try_recv() {
+        if self.ended {
+            std::thread::sleep(POLL_WAIT);
+            return out;
+        }
+        let first = super::runtime()
+            .block_on(async { tokio::time::timeout(POLL_WAIT, self.rx.recv()).await });
+        match first {
+            Ok(Some(e)) => {
                 out.push(e);
+                while let Ok(e) = self.rx.try_recv() {
+                    out.push(e);
+                }
             }
+            Ok(None) => self.ended = true,
+            Err(_) => {}
         }
         out
+    }
+
+    /// Whether the endpoint has ended (closed, or its accept task stopped) and every
+    /// connection with it: [`poll`](Self::poll) will return nothing from now on.
+    pub fn ended(&self) -> bool {
+        self.ended
     }
 
     /// Closes every connection (CONNECTION_CLOSE to each sender).
@@ -411,6 +437,27 @@ mod tests {
                 .any(|e| matches!(e, Event::Closed(_, why) if why == "closed"));
         }
         assert!(replaced, "the oldest connection closed for the newest");
+    }
+
+    #[test]
+    fn poll_reports_an_ended_endpoint_and_does_not_spin() {
+        let mut server =
+            Server::bind("127.0.0.1:0".parse().unwrap(), 1, 2, Limits::default()).unwrap();
+        assert!(!server.ended());
+        server.close_all();
+        let end = Instant::now() + Duration::from_secs(5);
+        while !server.ended() && Instant::now() < end {
+            assert!(server.poll().is_empty());
+        }
+        assert!(server.ended(), "a closed endpoint is reported as ended");
+        let t = Instant::now();
+        for _ in 0..3 {
+            assert!(server.poll().is_empty());
+        }
+        assert!(
+            t.elapsed() >= POLL_WAIT * 2,
+            "polling an ended endpoint waits instead of returning at once"
+        );
     }
 
     #[test]

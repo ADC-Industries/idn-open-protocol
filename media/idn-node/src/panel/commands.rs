@@ -103,7 +103,9 @@ impl State {
             "vscreens" => {
                 let v: Value = serde_json::from_slice(body).unwrap_or_default();
                 let s = |k: &str| v.get(k).and_then(Value::as_str).filter(|x| !x.is_empty());
-                match vscreens_change(s("action").unwrap_or(""), s("mode"), s("connector")) {
+                let changed = vscreens_change(s("action").unwrap_or(""), s("mode"), s("connector"));
+                self.devices_changed();
+                match changed {
                     Ok(msg) => Response::json(json!({ "ok": true, "message": msg }).to_string()),
                     Err(e) => Response::json_err("400 Bad Request", &e.to_string()),
                 }
@@ -115,7 +117,9 @@ impl State {
                 let Some(d) = crate::drivers::by_key(key) else {
                     return Response::json_err("400 Bad Request", "driver: display or audio");
                 };
-                match crate::drivers::win::install(d) {
+                let installed = crate::drivers::win::install(d);
+                self.devices_changed();
+                match installed {
                     Ok(reboot) => {
                         Response::json(json!({ "ok": true, "reboot": reboot }).to_string())
                     }

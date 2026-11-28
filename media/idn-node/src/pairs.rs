@@ -336,19 +336,21 @@ impl Pairs {
             .name("idn-node-pair".into())
             .spawn(move || {
                 let mut announced: Option<String> = None;
-                let mut ticked = Instant::now();
+                // (This machine as it answers (a copy of the settings, the key's SPKI) is
+                // looked at once a second for the announcement, and afresh for each
+                // request; not at each look for a request.)
+                let mut ticked: Option<Instant> = None;
                 while !pairs.stopped.load(Ordering::Relaxed) {
-                    let who = me();
-                    // Announced as this machine while it may link (not in a site).
-                    let name = who.as_ref().map(|(n, ..)| n.clone());
-                    if name != announced {
-                        if let Some(a) = &announcer {
-                            a.set(name.iter().map(|n| (n.clone(), port)).collect());
+                    if ticked.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
+                        ticked = Some(Instant::now());
+                        // Announced as this machine while it may link (not in a site).
+                        let name = me().map(|(n, ..)| n);
+                        if name != announced {
+                            if let Some(a) = &announcer {
+                                a.set(name.iter().map(|n| (n.clone(), port)).collect());
+                            }
+                            announced = name;
                         }
-                        announced = name;
-                    }
-                    if ticked.elapsed() >= Duration::from_secs(1) {
-                        ticked = Instant::now();
                         pairs.tick(&changed);
                     }
                     match l.accept() {
@@ -382,7 +384,7 @@ impl Pairs {
                                     }
                                 }
                             };
-                            let (p, w, c) = (pairs.clone(), who.clone(), changed.clone());
+                            let (p, w, c) = (pairs.clone(), me(), changed.clone());
                             let spawned = std::thread::Builder::new()
                                 .name("idn-node-pair-req".into())
                                 .spawn(move || {

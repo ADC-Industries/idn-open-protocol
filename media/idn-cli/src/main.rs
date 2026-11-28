@@ -257,6 +257,10 @@ fn run_outside(program: &str, before: &[&str], skip: usize) -> ExitCode {
     #[cfg(windows)]
     let status = cmd.spawn().and_then(|mut c| {
         idn_common::supervisor::in_job(&c);
+        // Ctrl+C reaches the program too (one console): it stops itself and finishes
+        // (`idn codec record`/`convert` remove their partial file); this launcher ending
+        // first would end it at once, through the job.
+        idn_common::win::ignore_ctrl_c();
         c.wait()
     });
     #[cfg(not(any(unix, windows)))]

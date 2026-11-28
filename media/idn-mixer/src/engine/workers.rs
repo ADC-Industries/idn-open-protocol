@@ -500,14 +500,22 @@ pub(super) fn watch_plugins(sh: &Arc<Shared>) {
     let started = Instant::now();
     let mut card_restart_said = false;
     let mut last_restart: Option<Instant> = None;
+    // The wait before the next start of the plugin host, growing while it keeps stopping
+    // (a plugin that crashes as it loads); back to the first once it runs for a minute.
+    let mut restarts =
+        idn_common::backoff::Backoff::new(Duration::from_secs(5), Duration::from_secs(60));
+    let mut restart_wait = Duration::ZERO;
     // A rate to run at already said in the log (run by hand: said once).
     let mut rate_said = 0u32;
-    let mut saved = sh
-        .cfg
-        .state_dir
-        .as_ref()
-        .and_then(|d| std::fs::read(d.join(DESK_FILE)).ok())
-        .unwrap_or_default();
+    let mut saved = SavedDesk {
+        bytes: sh
+            .cfg
+            .state_dir
+            .as_ref()
+            .and_then(|d| std::fs::read(d.join(DESK_FILE)).ok())
+            .unwrap_or_default(),
+        from: None,
+    };
     while !sh.stop.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(250));
         tick += 1;
@@ -524,14 +532,21 @@ pub(super) fn watch_plugins(sh: &Arc<Shared>) {
         }
         if sh.plugins.stopped() {
             sh.desk.lock_ok().set_plugins(None, BTreeMap::new());
-            // Not more than once in 5 s (a plugin that crashes as it loads).
-            if last_restart.is_some_and(|t| t.elapsed() < Duration::from_secs(5)) {
+            // Not more than once in 5 s, then 10, 20 … up to a minute (a plugin that
+            // crashes as it loads).
+            if last_restart.is_some_and(|t| t.elapsed() < restart_wait) {
                 continue;
             }
             idn_open_protocol::log::log("mixer: the plugin host stopped; starting it again");
             last_restart = Some(Instant::now());
+            restart_wait = restarts.next();
             sync_plugins(sh, false);
             continue;
+        }
+        if restarts.current().is_some()
+            && last_restart.is_some_and(|t| t.elapsed() >= Duration::from_secs(60))
+        {
+            restarts.reset();
         }
         if tick.is_multiple_of(4) {
             // The failure watch (§M.27), each second.
@@ -657,7 +672,7 @@ fn rate_wanted(sh: &Shared) -> u32 {
 /// the desk is saved and the program ends with `AGAIN_NOW`, which the supervisor starts
 /// again at once (a second of silence); run by hand, it says so once. Not while it records
 /// (bug run J2-6: the recording's last two seconds were cut): it waits.
-fn rate_moved(sh: &Shared, saved: &mut Vec<u8>, said: &mut u32) {
+fn rate_moved(sh: &Shared, saved: &mut SavedDesk, said: &mut u32) {
     let want = rate_wanted(sh);
     if want == crate::desk::rate_hz() || *said == want {
         return;
@@ -686,17 +701,31 @@ fn rate_moved(sh: &Shared, saved: &mut Vec<u8>, said: &mut u32) {
     ));
 }
 
+/// The desk's settings as last written: their bytes, and the settings they were made
+/// from (settings are only ever swapped whole, never changed in place, so the same `Arc`
+/// means the same settings).
+#[derive(Default)]
+pub(super) struct SavedDesk {
+    pub(super) bytes: Vec<u8>,
+    pub(super) from: Option<Arc<Settings>>,
+}
+
 /// Writes the desk's settings (with the plugins' states) if they changed since `last`.
-pub(super) fn save_desk(sh: &Shared, last: &mut Vec<u8>) {
+pub(super) fn save_desk(sh: &Shared, last: &mut SavedDesk) {
     let Some(dir) = &sh.cfg.state_dir else {
         return;
     };
-    // Serialised with the desk let go (once a second; it took the clock's lock with it).
     let s = sh.desk.lock_ok().settings_arc();
+    // The same settings as last written: nothing to serialise (this runs each second).
+    if last.from.as_ref().is_some_and(|f| Arc::ptr_eq(f, &s)) {
+        return;
+    }
+    // Serialised with the desk let go (it took the clock's lock with it).
     let Ok(b) = serde_json::to_vec(&*s) else {
         return;
     };
-    if b == *last {
+    if b == last.bytes {
+        last.from = Some(s);
         return;
     }
     // Whole or not at all (one writer at a time: the watcher and the stop hook).
@@ -704,7 +733,10 @@ pub(super) fn save_desk(sh: &Shared, last: &mut Vec<u8>) {
     let _one = SAVING.lock_ok();
     let ok = idn_common::fsutil::write_atomic(&dir.join(DESK_FILE), &b);
     match ok {
-        Ok(()) => *last = b,
+        Ok(()) => {
+            last.bytes = b;
+            last.from = Some(s);
+        }
         Err(e) => idn_open_protocol::log::log(&format!("mixer: can't save the desk: {e}")),
     }
 }

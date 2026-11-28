@@ -234,25 +234,116 @@ pub struct Metrics {
 /// How long a status made is given again ([`State::site_part`]).
 const STATUS_FRESH: Duration = Duration::from_millis(250);
 
+/// `v` with who asks (`me`).
+fn with_me(mut v: serde_json::Value, user: &str, role: Option<users::Role>) -> serde_json::Value {
+    let (all, limited) = role.map(users::capabilities).unzip();
+    v["me"] = serde_json::to_value(Me {
+        user: user.to_owned(),
+        role: role.map_or("", users::Role::as_str).to_owned(),
+        capabilities: all,
+        capabilities_limited: limited,
+    })
+    .unwrap_or_default();
+    v
+}
+
 /// [`SiteStatus`]'s JSON schema.
 pub fn status_schema() -> serde_json::Value {
     schemars::schema_for!(SiteStatus).to_value()
+}
+
+/// The status's numbers that move at every read with nothing having happened: each
+/// machine's `uptime_s`, `cpu_percent`, `gpu_percent`, `last_seen_s` and memory free, its
+/// clock's `offset_ns`, `delay_ns` and `jitter_ns`, a service's `for_s`. Left out of the
+/// hash the status's version follows (they still go in the status).
+const RUNNING_NUMBERS: &[&str] = &[
+    "uptime_s",
+    "cpu_percent",
+    "gpu_percent",
+    "last_seen_s",
+    "mem_free",
+    "offset_ns",
+    "delay_ns",
+    "jitter_ns",
+    "for_s",
+];
+
+/// How often the status's version also moves when only its running numbers changed: a
+/// push then carries fresh ones, and a long poll (`?after=`) ends, at least this often.
+const LIVE_EVERY: Duration = Duration::from_secs(10);
+
+/// Whether the status's version moves: something but the running numbers changed (`hash`
+/// differs from the last move's), or only they did and [`LIVE_EVERY`] passed since the
+/// last move.
+fn version_moves(
+    last_hash: u64,
+    hash: u64,
+    since_move: Duration,
+    numbers_moved: impl FnOnce() -> bool,
+) -> bool {
+    last_hash != hash || (since_move >= LIVE_EVERY && numbers_moved())
+}
+
+/// Whether `a` and `b` differ in anything but their `version`.
+fn differ_but_version(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    let unversioned = |v: &serde_json::Value| {
+        let mut v = v.clone();
+        if let Some(o) = v.as_object_mut() {
+            o.remove("version");
+        }
+        v
+    };
+    unversioned(a) != unversioned(b)
+}
+
+/// The hash the status's version follows: of `v` without its `version`, `me` and
+/// [`RUNNING_NUMBERS`].
+fn version_hash(v: &serde_json::Value) -> u64 {
+    use serde_json::Value;
+    fn strip(v: &mut Value) {
+        match v {
+            Value::Object(m) => {
+                for k in RUNNING_NUMBERS {
+                    m.remove(*k);
+                }
+                m.values_mut().for_each(strip);
+            }
+            Value::Array(a) => a.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    use std::hash::{Hash, Hasher};
+    let mut v = v.clone();
+    if let Some(o) = v.as_object_mut() {
+        o.remove("version");
+        o.remove("me");
+    }
+    strip(&mut v);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    v.to_string().hash(&mut h);
+    h.finish()
 }
 
 impl State {
     /// The status for `user` (with `role`), as JSON: the site's part
     /// ([`State::site_part`]) with who asks.
     pub(super) fn status_for(&self, user: &str, role: Option<users::Role>) -> serde_json::Value {
-        let (mut v, _) = self.site_part();
-        let (all, limited) = role.map(users::capabilities).unzip();
-        v["me"] = serde_json::to_value(Me {
-            user: user.to_owned(),
-            role: role.map_or("", users::Role::as_str).to_owned(),
-            capabilities: all,
-            capabilities_limited: limited,
-        })
-        .unwrap_or_default();
-        v
+        let (v, _) = self.site_part();
+        with_me(v, user, role)
+    }
+
+    /// [`State::status_for`] as it was when the version last moved (each machine's running
+    /// numbers as they were then): what the push channel compares and sends, so that
+    /// uptimes and ages ticking send nothing until [`LIVE_EVERY`] passed; a push carries
+    /// the numbers of its change.
+    pub(super) fn pushed_status_for(
+        &self,
+        user: &str,
+        role: Option<users::Role>,
+    ) -> serde_json::Value {
+        let (now, _) = self.site_part();
+        let moved = self.status_seen.lock_ok().2.clone();
+        with_me(if moved.is_null() { now } else { moved }, user, role)
     }
 
     /// The status's version now.
@@ -261,9 +352,9 @@ impl State {
     }
 
     /// The site's part of the status (`me` empty) and its version (moved on when anything
-    /// in it changed since the last look): made again at most every [`STATUS_FRESH`] (every
-    /// push channel and long poll asks; building it reads every machine's report), and
-    /// after any change ([`State::status_changed`]).
+    /// in it but its running numbers changed since the last look): made again at most
+    /// every [`STATUS_FRESH`] (every push channel and long poll asks; building it reads
+    /// every machine's report), and after any change ([`State::status_changed`]).
     fn site_part(&self) -> (serde_json::Value, u64) {
         let mut g = self.status_cache.lock_ok();
         if let Some((at, v, ver)) = g.as_ref()
@@ -272,9 +363,8 @@ impl State {
             return (v.clone(), *ver);
         }
         let s = self.site_status();
-        let text = serde_json::to_string(&s).unwrap_or_default();
-        let ver = self.status_version(&text);
         let mut v = serde_json::to_value(&s).unwrap_or_default();
+        let ver = self.status_version(&v);
         v["version"] = ver.into();
         *g = Some((std::time::Instant::now(), v.clone(), ver));
         (v, ver)
@@ -285,16 +375,18 @@ impl State {
         *self.status_cache.lock_ok() = None;
     }
 
-    /// The status's version: moved on when `text` (the status without it) differs from
-    /// the last.
-    fn status_version(&self, text: &str) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        text.hash(&mut h);
-        let h = h.finish();
+    /// The status's version: moved on when `v` (without its running numbers) differs from
+    /// the last, or when only its running numbers changed and [`LIVE_EVERY`] passed since
+    /// the last move; the status kept as it was then.
+    fn status_version(&self, v: &serde_json::Value) -> u64 {
+        let h = version_hash(v);
         let mut g = self.status_seen.lock_ok();
-        if g.1 != h {
-            *g = (g.0 + 1, h);
+        let (last_ver, last_h, last, at) = &*g;
+        if version_moves(*last_h, h, at.elapsed(), || differ_but_version(last, v)) {
+            let ver = last_ver + 1;
+            let mut moved = v.clone();
+            moved["version"] = ver.into();
+            *g = (ver, h, moved, std::time::Instant::now());
         }
         g.0
     }
@@ -625,5 +717,53 @@ fn node_view(n: &idn_open_protocol::trust::NodeReport) -> NodeView {
                     .collect(),
             })
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// A machine's uptime, age and clock offset moving don't move the status's version;
+    /// a machine going offline does.
+    #[test]
+    fn the_version_ignores_the_running_numbers() {
+        let a = serde_json::json!({
+            "version": 7,
+            "me": {"user": "admin"},
+            "machines": [{"name": "BOOTH", "online": true, "node": {
+                "uptime_s": 61, "cpu_percent": 3.5, "last_seen_s": 4,
+                "clock": {"state": "slave", "offset_ns": "120", "jitter_ns": "310"},
+            }}],
+        });
+        let mut b = a.clone();
+        b["version"] = 8.into();
+        b["me"]["user"] = "operator".into();
+        let n = &mut b["machines"][0]["node"];
+        n["uptime_s"] = 91.into();
+        n["cpu_percent"] = 4.0.into();
+        n["last_seen_s"] = 1.into();
+        n["clock"]["offset_ns"] = "-85".into();
+        n["clock"]["jitter_ns"] = "296".into();
+        assert_eq!(super::version_hash(&a), super::version_hash(&b));
+        b["machines"][0]["online"] = false.into();
+        assert_ne!(super::version_hash(&a), super::version_hash(&b));
+    }
+
+    /// The running numbers alone move the version only once [`super::LIVE_EVERY`] passed
+    /// since the last move (and only if they changed); anything else moves it at once.
+    #[test]
+    fn the_running_numbers_move_the_version_every_ten_seconds() {
+        use super::{LIVE_EVERY, differ_but_version, version_moves};
+        use std::time::Duration;
+        let a = serde_json::json!({"version": 3, "machines": [{"node": {"uptime_s": 61}}]});
+        let b = serde_json::json!({"version": 0, "machines": [{"node": {"uptime_s": 70}}]});
+        let near = LIVE_EVERY - Duration::from_secs(1);
+        assert!(!version_moves(1, 1, near, || differ_but_version(&a, &b)));
+        assert!(version_moves(1, 1, LIVE_EVERY, || differ_but_version(
+            &a, &b
+        )));
+        assert!(!version_moves(1, 1, LIVE_EVERY, || differ_but_version(
+            &a, &a
+        )));
+        assert!(version_moves(1, 2, Duration::ZERO, || false));
     }
 }

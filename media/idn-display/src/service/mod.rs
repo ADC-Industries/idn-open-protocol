@@ -36,8 +36,13 @@ type Thumb = (Instant, Result<Vec<u8>, String>);
 pub const FILE: &str = "screens.json";
 /// How often the screens are listed again (a screen plugged in or out).
 const LIST_EVERY: Duration = Duration::from_secs(10);
-/// A screen's process that stopped is started again after this.
+/// With no screens listed (or the listing failing), the wait before listing again grows
+/// from [`LIST_EVERY`] to this; back to [`LIST_EVERY`] once screens are listed.
+const LIST_EVERY_MOST: Duration = Duration::from_secs(30);
+/// A screen's process that stopped is started again after this; while it keeps stopping
+/// before its window is up, the wait grows to [`RESTART_AFTER_MOST`].
 const RESTART_AFTER: Duration = Duration::from_secs(3);
+const RESTART_AFTER_MOST: Duration = Duration::from_secs(60);
 /// Typed events kept for the push channels.
 const EVENTS_KEPT: usize = 256;
 /// The service's own settings (the network API on or off).
@@ -107,18 +112,23 @@ struct Running {
     drops: VecDeque<(Instant, u64)>,
 }
 
-#[derive(Default)]
 struct Inner {
     /// Bumped at every change worth sending (not the figures).
     version: u64,
     screens: Vec<ScreenInfo>,
     listed_at: Option<Instant>,
+    /// The wait before the next listing: [`LIST_EVERY`] while screens are listed, growing
+    /// while none are (no desktop, the listing failing).
+    list_waits: idn_common::backoff::Backoff,
     list_error: Option<String>,
     saved: BTreeMap<String, Saved>,
     running: BTreeMap<String, Running>,
     /// A screen's last status kept after its process ended (and why it ended).
     last: BTreeMap<String, Status>,
     failed: BTreeMap<String, (Instant, String)>,
+    /// A failing screen's waits before its process is started again (reset once its
+    /// window is up).
+    restart_waits: BTreeMap<String, idn_common::backoff::Backoff>,
     identify: BTreeMap<String, (Instant, f64)>,
     /// Screens showing the test pattern, until when (`None`: until turned off).
     test: BTreeMap<String, Option<Instant>>,
@@ -129,6 +139,96 @@ struct Inner {
     cards_at: Option<Instant>,
     /// The network API turned off (`lan`), kept in `service.json`.
     lan_off: bool,
+}
+
+impl Default for Inner {
+    fn default() -> Inner {
+        Inner {
+            version: 0,
+            screens: Vec::new(),
+            listed_at: None,
+            list_waits: list_waits(),
+            list_error: None,
+            saved: BTreeMap::new(),
+            running: BTreeMap::new(),
+            last: BTreeMap::new(),
+            failed: BTreeMap::new(),
+            restart_waits: BTreeMap::new(),
+            identify: BTreeMap::new(),
+            test: BTreeMap::new(),
+            events: VecDeque::new(),
+            event_seq: 0,
+            cards: None,
+            cards_at: None,
+            lan_off: false,
+        }
+    }
+}
+
+/// The waits between listings while no screens are listed.
+fn list_waits() -> idn_common::backoff::Backoff {
+    idn_common::backoff::Backoff::new(LIST_EVERY, LIST_EVERY_MOST)
+}
+
+impl Inner {
+    /// The wait before the next listing.
+    fn list_wait(&self) -> Duration {
+        self.list_waits.current().unwrap_or(LIST_EVERY)
+    }
+
+    /// A listing done: with screens, the next in [`LIST_EVERY`]; with none (or it
+    /// failing), each next wait longer, up to [`LIST_EVERY_MOST`].
+    fn listed(&mut self, any: bool) {
+        if any {
+            self.list_waits.reset();
+        } else {
+            self.list_waits.next();
+        }
+    }
+
+    /// The screens listed again at the next look, the waits between listings back to
+    /// [`LIST_EVERY`]: a command reads the screens or changes a screen's settings or feed.
+    fn list_soon(&mut self) {
+        self.listed_at = None;
+        self.list_waits.reset();
+    }
+
+    /// The wait before `screen`'s process is started again after it stopped.
+    fn restart_wait(&self, screen: &str) -> Duration {
+        self.restart_waits
+            .get(screen)
+            .and_then(|b| b.current())
+            .unwrap_or(RESTART_AFTER)
+    }
+
+    /// `screen`'s process stopped or couldn't start (`why`) at `now`: kept as failed, and
+    /// its next start after a wait that grows while it keeps failing; said once for each
+    /// longer wait.
+    fn failed_now(&mut self, screen: &str, why: String, now: Instant) {
+        let b = self
+            .restart_waits
+            .entry(screen.to_owned())
+            .or_insert_with(|| {
+                idn_common::backoff::Backoff::new(RESTART_AFTER, RESTART_AFTER_MOST)
+            });
+        let was = b.current();
+        let wait = b.next();
+        if was != Some(wait) {
+            eprintln!(
+                "idn-display: screen {screen}: {why}; started again in {} s",
+                wait.as_secs()
+            );
+        }
+        self.failed.insert(screen.to_owned(), (now, why));
+    }
+
+    /// `screen`'s process is up (or a person restarted it, or its saved settings or feed
+    /// changed): started at the next look if it isn't running, and the next failure waits
+    /// [`RESTART_AFTER`] again.
+    fn came_up(&mut self, screen: &str) {
+        self.failed.remove(screen);
+        self.restart_waits.remove(screen);
+    }
 }
 
 /// The service's own settings, as kept.
@@ -407,7 +507,7 @@ impl Service {
     fn relist(&self) {
         let due = {
             let g = self.inner.lock_ok();
-            g.listed_at.is_none_or(|t| t.elapsed() >= LIST_EVERY)
+            g.listed_at.is_none_or(|t| t.elapsed() >= g.list_wait())
         };
         if !due {
             return;
@@ -432,6 +532,14 @@ impl Service {
                 self.bump(&mut g);
             }
         }
+        // (Listing starts a program: with no screens, or it failing the same way, less and
+        // less often; every [`LIST_EVERY`] while there are screens, to see one plugged in
+        // or out, and again after the listing changed.)
+        let changed = match &listed {
+            Ok(l) => g.screens != *l || g.list_error.is_some(),
+            Err(e) => g.list_error.as_deref() != Some(e.as_str()),
+        };
+        g.listed(changed || listed.as_ref().is_ok_and(|l| !l.is_empty()));
         match listed {
             Ok(l) => {
                 let before: Vec<String> = g.screens.iter().map(|s| s.name.clone()).collect();
@@ -487,7 +595,7 @@ impl Service {
             } else {
                 why
             };
-            g.failed.insert(k.clone(), (now, why.clone()));
+            g.failed_now(&k, why.clone(), now);
             self.event(g, "stopped", &k, json!({"error": why}));
             self.bump(g);
         }
@@ -508,9 +616,10 @@ impl Service {
                 continue;
             }
             if !g.running.contains_key(&s.name) {
+                let wait = g.restart_wait(&s.name);
                 if g.failed
                     .get(&s.name)
-                    .is_some_and(|(t, _)| now.duration_since(*t) < RESTART_AFTER)
+                    .is_some_and(|(t, _)| now.duration_since(*t) < wait)
                 {
                     continue;
                 }
@@ -531,7 +640,7 @@ impl Service {
                         self.bump(g);
                     }
                     Err(e) => {
-                        g.failed.insert(s.name.clone(), (now, e));
+                        g.failed_now(&s.name, e, now);
                         self.bump(g);
                         continue;
                     }
@@ -601,7 +710,7 @@ impl Service {
                                 });
                             }
                         }
-                        g.failed.remove(&name);
+                        g.came_up(&name);
                         self.bump(g);
                     }
                     FromChild::Status { status } => self.took_status(g, &name, status),

@@ -847,3 +847,80 @@ fn a_smaller_screen_and_dropped_pictures_are_problems() {
     big["dropped_last_min"] = json!(3);
     assert!(size_and_drop_problems(&big).is_empty());
 }
+
+/// A screen whose process keeps stopping before its window is up waits 3 s, then twice as
+/// long each time up to a minute, and 3 s again once one came up; with no screens listed,
+/// the listing waits 10 s, then twice as long each time up to 30 s, and 10 s again once
+/// screens are there or a command asks for a listing soon.
+#[test]
+fn failing_screens_and_empty_listings_wait_longer_each_time() {
+    let mut g = Inner::default();
+    let now = Instant::now();
+    let waits: Vec<u64> = (0..7)
+        .map(|_| {
+            g.failed_now("HDMI-1", "it stopped".into(), now);
+            g.restart_wait("HDMI-1").as_secs()
+        })
+        .collect();
+    assert_eq!(waits, [3, 6, 12, 24, 48, 60, 60]);
+    assert_eq!(g.restart_wait("HDMI-2"), RESTART_AFTER);
+    g.came_up("HDMI-1");
+    assert_eq!(g.restart_wait("HDMI-1"), RESTART_AFTER);
+    assert!(!g.failed.contains_key("HDMI-1"));
+    assert_eq!(g.list_wait(), LIST_EVERY);
+    let waits: Vec<u64> = (0..6)
+        .map(|_| {
+            g.listed(false);
+            g.list_wait().as_secs()
+        })
+        .collect();
+    assert_eq!(waits, [10, 20, 30, 30, 30, 30]);
+    g.listed(true);
+    assert_eq!(g.list_wait(), LIST_EVERY);
+    g.listed(false);
+    g.listed(false);
+    g.listed_at = Some(Instant::now());
+    g.list_soon();
+    assert_eq!(g.list_wait(), LIST_EVERY);
+    assert!(g.listed_at.is_none());
+}
+
+/// A screen whose process stopped waits before it is started again; a change to its
+/// settings or feed starts it at the next look instead.
+#[test]
+fn a_setting_change_ends_the_restart_wait() {
+    let d = dir("restart-wait");
+    let (svc, shared, _, _) = service(&d);
+    svc.tend();
+    post(
+        &svc,
+        "feed",
+        json!({"screen": 1, "source": "BOOTH (Program)"}),
+    );
+    svc.tend();
+    assert_eq!(shared.lock_ok().started.get("DP-1"), Some(&1));
+    shared
+        .lock_ok()
+        .end
+        .insert("DP-1".into(), "it stopped".into());
+    svc.tend();
+    svc.tend();
+    // (Within its wait: not started again yet.)
+    assert_eq!(shared.lock_ok().started.get("DP-1"), Some(&1));
+    let r = post(&svc, "settings", json!({"screen": 1, "rotation": 90}));
+    assert_eq!(r.status, "200 OK", "{}", String::from_utf8_lossy(&r.body));
+    svc.tend();
+    assert_eq!(shared.lock_ok().started.get("DP-1"), Some(&2));
+    shared
+        .lock_ok()
+        .end
+        .insert("DP-1".into(), "it stopped".into());
+    svc.tend();
+    post(
+        &svc,
+        "feed",
+        json!({"screen": 1, "source": "BOOTH (Preview)"}),
+    );
+    svc.tend();
+    assert_eq!(shared.lock_ok().started.get("DP-1"), Some(&3));
+}

@@ -188,6 +188,12 @@ fn remove_on_stop(
     idn_open_protocol::shutdown::register(move || d.remove())
 }
 
+/// The waits before a capture that couldn't be made is tried again: 2 s, then 3 s (a
+/// replugged interface comes back within that).
+fn capture_retries() -> idn_common::backoff::Backoff {
+    idn_common::backoff::Backoff::new(Duration::from_secs(2), Duration::from_secs(3))
+}
+
 fn send_with(mut args: idn_open_protocol::cli::Args, speaker: bool) {
     let mut cfg = CaptureConfig::default();
     let (mut name, mut port, mut server, mut mdns, mut seconds) =
@@ -390,7 +396,10 @@ fn send_with(mut args: idn_open_protocol::cli::Args, speaker: bool) {
     // Ctrl+C: the outputs' stop notices go out, then the process exits.
     idn_open_protocol::shutdown::install();
     let (start, mut next) = (Instant::now(), Instant::now() + Duration::from_secs(10));
-    let mut retry = Instant::now() + Duration::from_secs(2);
+    // The capture made again while it can't be (its device or program not there): after
+    // 2 s, then every 3 s while it keeps failing.
+    let mut retries = capture_retries();
+    let mut retry = Instant::now() + retries.next();
     loop {
         std::thread::sleep(Duration::from_millis(100));
         let done = seconds > 0 && start.elapsed() >= Duration::from_secs(seconds);
@@ -398,8 +407,9 @@ fn send_with(mut args: idn_open_protocol::cli::Args, speaker: bool) {
             if let Ok(c) = make() {
                 said(&c);
                 capture = Some(c);
+                retries.reset();
             }
-            retry = Instant::now() + Duration::from_secs(2);
+            retry = Instant::now() + retries.next();
         }
         if let Some(capture) = &capture
             && (Instant::now() >= next || done)
@@ -425,7 +435,8 @@ fn send_with(mut args: idn_open_protocol::cli::Args, speaker: bool) {
         if let Some(why) = capture.as_ref().and_then(|c| c.stats().ended) {
             waiting(&why);
             capture = None;
-            retry = Instant::now() + Duration::from_secs(2);
+            retries.reset();
+            retry = Instant::now() + retries.next();
         }
     }
     finish(capture, out);
@@ -1194,5 +1205,20 @@ fn aes67(mut args: idn_open_protocol::cli::Args) {
             finish(tx, input);
         }
         other => args.fail(&format!("aes67: unknown command {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A capture whose device stays away is tried again after 2 s, then every 3 s.
+    #[test]
+    fn capture_retries_back_off() {
+        let mut b = capture_retries();
+        let secs: Vec<u64> = (0..4).map(|_| b.next().as_secs()).collect();
+        assert_eq!(secs, [2, 3, 3, 3]);
+        b.reset();
+        assert_eq!(b.next(), Duration::from_secs(2));
     }
 }

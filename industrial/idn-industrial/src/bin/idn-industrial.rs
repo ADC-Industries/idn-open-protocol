@@ -156,6 +156,9 @@ fn main() {
     }
     // Its log file and crash reports (§N.16).
     idn_open_protocol::diag::init("idn-industrial");
+    // The library's own lines (Voice's listeners, trust, discovery) to stderr, beside
+    // this program's: without a logger they were dropped.
+    idn_open_protocol::log::set_logger(|m| eprintln!("{m}"));
     let r = args().and_then(|a| match a.cmd.as_str() {
         "run" => run(a, None),
         "service" => service(a),

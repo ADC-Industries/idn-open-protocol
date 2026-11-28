@@ -16,6 +16,9 @@ impl Authority {
     /// site's join mode, and may join with a typed code (§E.10.10). A hello without
     /// version 2 or later is not served (§E.10.2).
     pub(crate) fn serve_hello(&self, mut s: TcpStream, first: &str) {
+        // Blocking, whatever the listener that accepted it was (an accepted socket may
+        // inherit non-blocking mode): the reads below wait on their timeouts, not spin.
+        let _ = s.set_nonblocking(false);
         let version = crate::xml::parse(first.trim_end_matches('\0'))
             .and_then(|e| e.attr("version").and_then(|v| v.parse::<u32>().ok()));
         let peer = s.peer_addr().ok().map(|a| a.ip());

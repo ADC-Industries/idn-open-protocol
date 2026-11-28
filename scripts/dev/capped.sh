@@ -17,7 +17,7 @@ log=$dir/$name.mem
 hw=$(dirname "$(grep -l k10temp /sys/class/hwmon/hwmon*/name)")
 (
   while sleep 1; do
-    cg=$(systemctl --user show -p ControlGroup --value "$name.scope" 2>/dev/null)
+    cg=$(systemctl --user show -p ControlGroup --value "$name-$$.scope" 2>/dev/null)
     [ -n "$cg" ] && [ -d "/sys/fs/cgroup$cg" ] || continue
     d=/sys/fs/cgroup$cg
     echo "$(date +%T) cur=$(( $(cat $d/memory.current) / 1048576 ))M peak=$(( $(cat $d/memory.peak) / 1048576 ))M anon=$(awk '/^anon /{print int($2/1048576)}' $d/memory.stat)M avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)M cpu=$(( $(cat $hw/temp1_input) / 1000 ))C procs=$(wc -l < $d/cgroup.procs) oom_kills=$(awk '/oom_kill /{print $2}' $d/memory.events)" >> "$log"
@@ -27,7 +27,7 @@ sampler=$!
 # A hard CPU ceiling for everything in the scope (compilers, their threads, linkers):
 # CAP_CPU, default 400% (four cores of the host's 16; builds at 4 jobs still
 # drove the load to 65, each compile and link running threads of its own).
-CARGO_BUILD_JOBS=$jobs systemd-run --user --scope --unit="$name" -q \
+CARGO_BUILD_JOBS=$jobs systemd-run --user --scope --unit="$name-$$" --collect -q \
   -p MemoryMax="$max" -p MemorySwapMax=0 -p CPUQuota="${CAP_CPU:-400%}" cargo "$@"
 rc=$?
 kill $sampler 2>/dev/null

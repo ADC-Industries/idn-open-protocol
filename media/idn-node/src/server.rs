@@ -70,6 +70,21 @@ pub const PANEL_PORT: u16 = idn_common::ports::NODE_PANEL;
 pub(crate) static MACHINE_RATE: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(idn_open_protocol::node::rate::DEFAULT);
 
+/// The status's numbers that move at every read with nothing having happened: the site
+/// clock's `offset_ns`, `delay_ns` and `jitter_ns`, the Node's `uptime_s`, the machine's
+/// `cpu_percent`, `gpu_percent` and `mem_free`, each service's `for_s`. Left out when
+/// telling whether the site report or the panel's status changed (they still go in both).
+pub(crate) const RUNNING_NUMBERS: &[&str] = &[
+    "offset_ns",
+    "delay_ns",
+    "jitter_ns",
+    "uptime_s",
+    "cpu_percent",
+    "gpu_percent",
+    "mem_free",
+    "for_s",
+];
+
 /// A program's outgoing messages, waiting for its connection's writer, by size: past
 /// [`OUTBOX_MAX`] unsent, nothing more is queued and the connection is ended (a program
 /// that never read its replies grew the Node by hundreds of MB a second, deep bug run
@@ -282,6 +297,9 @@ pub struct NodeCore {
     pin_lock: idn_open_protocol::web::PinLock,
     /// Look for a Site Manager now, not at the next half minute (the wizard, §N.22).
     search_now: AtomicBool,
+    /// A crash report kept since the site loop last looked: it looks at the folder now,
+    /// not at its next minute.
+    crash_kept: AtomicBool,
     /// An update being fetched (§N.23); after that, the files say where it is.
     update: Mutex<Option<crate::update::Progress>>,
     /// The site's newest release for this machine as last asked (`check_updates`,

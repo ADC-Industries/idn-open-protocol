@@ -28,9 +28,6 @@ const MOST: usize = 9600;
 /// program's, `name` the source's name.
 pub fn run(url: &str, token: &str, name: &str, stop: &AtomicBool) -> io::Result<()> {
     let (mut ws, _) = tungstenite::connect(format!("{url}?feed={token}")).map_err(err)?;
-    if let tungstenite::stream::MaybeTlsStream::Plain(s) = ws.get_ref() {
-        s.set_read_timeout(Some(Duration::from_millis(2)))?;
-    }
     let publisher = Publisher::new(PublisherConfig::default())?;
     let out = Output::new(&publisher, OutputConfig::new(name))?;
     let mut talkers: HashMap<u32, Talker> = HashMap::new();
@@ -38,6 +35,15 @@ pub fn run(url: &str, token: &str, name: &str, stop: &AtomicBool) -> io::Result<
     let mut blocks: u64 = 0;
     let mut pinged = Instant::now();
     while !stop.load(Ordering::Relaxed) {
+        // Plain WebSocket: woken by a packet, or when the next block is due (at least
+        // 1 ms: a zero timeout is refused); not every few ms in between.
+        if let tungstenite::stream::MaybeTlsStream::Plain(s) = ws.get_ref() {
+            let next = start + Duration::from_millis(20 * blocks);
+            let wait = next
+                .saturating_duration_since(Instant::now())
+                .clamp(Duration::from_millis(1), Duration::from_millis(20));
+            s.set_read_timeout(Some(wait))?;
+        }
         match ws.read() {
             Ok(Message::Binary(b)) if b.len() > 13 && (b[0] == 1 || b[0] == 3) => {
                 let talker = u32::from_le_bytes(b[1..5].try_into().unwrap());

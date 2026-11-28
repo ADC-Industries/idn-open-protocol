@@ -108,11 +108,21 @@ struct State {
     /// Per-control sequence numbers over HTTP (`X-IDN-Client`, `X-IDN-Control`,
     /// `X-IDN-Seq`): a change older than one applied to its control is skipped.
     seq: Mutex<web::events::Sequencer>,
-    /// The status's version, and the hash of the status it was given for (panel/front.rs).
-    status_seen: Mutex<(u64, u64)>,
+    /// The status's version, the hash of the status it was given for (without its running
+    /// numbers), that status as it was then, and when (panel/front.rs).
+    status_seen: Mutex<(u64, u64, Value, Instant)>,
     /// The status last made, when, and its version.
     status_cache: Mutex<Option<(std::time::Instant, Value, u64)>>,
+    /// The drivers and virtual screens as the status shows them (`vsound`, `vscreens`),
+    /// and when read: read again after a change to them here, else every
+    /// [`DEVICES_FRESH`] (on Windows each read enumerates the devices; on Linux it reads
+    /// the boot settings and the connectors).
+    devices: Mutex<Option<(Instant, Value, Value)>>,
 }
+
+/// How long the drivers' and virtual screens' state is shown before it is read again,
+/// when nothing here changed them (an install from the command line, a reboot pending).
+const DEVICES_FRESH: Duration = Duration::from_secs(30);
 
 /// A search for announced AES67 streams: `idn audio aes67 list --tsv`, 30 s.
 #[derive(Default)]
@@ -151,8 +161,9 @@ impl Panel {
             },
             audit: web::audit::Audit::for_engine(Some(core.state_dir())),
             seq: Mutex::default(),
-            status_seen: Mutex::new((0, 0)),
+            status_seen: Mutex::new((0, 0, Value::Null, Instant::now())),
             status_cache: Mutex::new(None),
+            devices: Mutex::new(None),
         });
         let stop = Arc::new(AtomicBool::new(false));
         let s2 = st.clone();
@@ -618,6 +629,39 @@ fn x32_driver() -> Option<bool> {
     #[cfg(not(windows))]
     {
         None
+    }
+}
+
+impl State {
+    /// `(vsound, vscreens)` for the status: read at most every [`DEVICES_FRESH`], or
+    /// after [`State::devices_changed`].
+    fn devices(&self) -> (Value, Value) {
+        let mut g = self.devices.lock_ok();
+        if let Some((at, vsound, vscreens)) = g.as_ref()
+            && at.elapsed() < DEVICES_FRESH
+        {
+            return (vsound.clone(), vscreens.clone());
+        }
+        // IDN's virtual sound card (Windows 11, §N.37): whether this Windows takes it,
+        // installed, its package here; null elsewhere.
+        let vsound = if cfg!(windows) {
+            let d = &crate::drivers::AUDIO;
+            json!({
+                "supported": crate::drivers::win::supported(d),
+                "installed": crate::drivers::win::installed(d),
+                "package": crate::drivers::package(d).is_some(),
+            })
+        } else {
+            Value::Null
+        };
+        let vscreens = vscreens_state();
+        *g = Some((Instant::now(), vsound.clone(), vscreens.clone()));
+        (vsound, vscreens)
+    }
+
+    /// A driver or a virtual screen changed here: read them again for the next status.
+    fn devices_changed(&self) {
+        *self.devices.lock_ok() = None;
     }
 }
 

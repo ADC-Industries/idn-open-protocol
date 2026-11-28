@@ -250,9 +250,12 @@ pub(super) fn is_picture(path: &str) -> bool {
     .any(|e| path.to_ascii_lowercase().ends_with(e))
 }
 
-/// Waits up to `max` for the switcher's state to change past `version`, without holding
-/// the service between short waits (a host's drop of it isn't held up, nor run on a
-/// background thread): the version now, or `None` once the service is gone.
+/// Waits up to `max` for the switcher's state to really change past `version` (its
+/// [`state_version`](crate::Switcher::state_version): the timers' seconds don't count, so
+/// a watcher of real changes doesn't build the state again each second while a timer
+/// runs), without holding the service between short waits (a host's drop of it isn't held
+/// up, nor run on a background thread): the state version now, or `None` once the service
+/// is gone.
 pub(super) fn wait_change_weak(
     service: &std::sync::Weak<Service>,
     version: u64,
@@ -262,7 +265,7 @@ pub(super) fn wait_change_weak(
     loop {
         let sw = service.upgrade()?.sw.clone();
         let left = end.saturating_duration_since(Instant::now());
-        let v = sw.wait_change(version, left.min(Duration::from_millis(250)));
+        let v = sw.wait_state_change(version, left.min(Duration::from_millis(250)));
         if v != version || left.is_zero() {
             return Some(v);
         }

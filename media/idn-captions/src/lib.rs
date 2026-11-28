@@ -245,13 +245,33 @@ fn device(gpu: bool) -> Option<Gpu> {
 
 /// Its name in logs and in `auto.txt`.
 fn device_name(gpu: Option<&Gpu>) -> String {
-    gpu.map_or_else(
-        || {
-            let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-            format!("CPU ({threads} threads)")
-        },
-        |g| g.name.clone(),
-    )
+    gpu.map_or_else(|| cpu_label(0), |g| g.name.clone())
+}
+
+/// The CPU threads a pass uses: `requested`, or (0) all but two (at least one).
+pub(crate) fn cpu_threads(requested: usize) -> usize {
+    if requested > 0 {
+        return requested;
+    }
+    std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .saturating_sub(2)
+        .max(1)
+}
+
+/// "CPU (N threads)" with the threads a pass uses ([`EngineConfig::threads`], else all but
+/// two), not the machine's count.
+fn cpu_label(requested: usize) -> String {
+    format!("CPU ({} threads)", cpu_threads(requested))
+}
+
+/// The device as the Engine shows it: on the CPU, with the threads its settings give.
+fn shown_device(device: &str, cfg: &EngineConfig) -> String {
+    if device.starts_with("CPU (") {
+        cpu_label(cfg.threads)
+    } else {
+        device.to_owned()
+    }
 }
 
 /// The models "auto" tries, largest first: from large-v3-turbo on a card of its own with
@@ -919,7 +939,8 @@ pub struct Engine {
     log_sent: bool,
     /// Seconds of work for each second of audio, on average (below 1: it keeps up).
     pub load: f64,
-    /// What whisper runs on: the GPU's name, or "CPU (N threads)".
+    /// What whisper runs on: the GPU's name, or "CPU (N threads)" with the threads a pass
+    /// uses (`EngineConfig::threads`, else all but two).
     pub device: String,
     /// whisper runs in a worker process ([`EngineConfig::priority`]), not in this one.
     pub in_worker: bool,
@@ -946,6 +967,7 @@ impl Engine {
             ));
         }
         let (whisper, device, priority) = open_whisper(path, &cfg)?;
+        let device = shown_device(&device, &cfg);
         Ok(Engine {
             in_worker: matches!(whisper, Whisper::Worker(_)),
             whisper,
@@ -979,10 +1001,24 @@ impl Engine {
         if let Whisper::Worker(w) = &self.whisper
             && !w.device.is_empty()
         {
-            self.device.clone_from(&w.device);
+            self.device = shown_device(&w.device, &self.cfg);
             self.priority = w.priority;
         }
         r
+    }
+
+    /// whisper's worker looked after without waiting: one that ended is noticed and started
+    /// again on its schedule (1 s after it ended, then 5 s, 30 s, 60 s), quiet or not.
+    /// [`step`](Self::step) does it each time; a caller with no sound to step with calls it
+    /// meanwhile (a few times a second). Nothing with whisper in this process.
+    pub fn tend(&mut self) {
+        if let Whisper::Worker(r) = &mut self.whisper {
+            r.tend();
+            if !r.device.is_empty() {
+                self.device = shown_device(&r.device, &self.cfg);
+                self.priority = r.priority;
+            }
+        }
     }
 
     /// More sound (mono, at `rate`).
@@ -1063,8 +1099,20 @@ impl Engine {
     }
 
     /// Listens to what came since the last step: the draft of the line now and, at a pause
-    /// or at its longest, the line made final (then the next line starts).
+    /// or at its longest, the line made final (then the next line starts). The worker is
+    /// looked after first ([`tend`](Self::tend)), whether or not there is speech to pass.
     pub fn step(&mut self) -> Result<Vec<CaptionLine>, String> {
+        self.step_with(None)
+    }
+
+    /// [`step`](Self::step), a pass under way ended when `stop` is set (the error
+    /// [`STOPPED`]; in a worker, killed if it doesn't end within a second).
+    pub fn step_stop(&mut self, stop: &Arc<AtomicBool>) -> Result<Vec<CaptionLine>, String> {
+        self.step_with(Some(stop))
+    }
+
+    fn step_with(&mut self, stop: Option<&Arc<AtomicBool>>) -> Result<Vec<CaptionLine>, String> {
+        self.tend();
         let rate = RATE as usize;
         let len = self.audio.len();
         if len < rate / 2 {
@@ -1132,7 +1180,7 @@ impl Engine {
             audio.resize(rate + rate / 10, 0.0);
         }
 
-        let segments = self.pass(&p, &audio, None)?;
+        let segments = self.pass(&p, &audio, stop)?;
         // Segments whisper itself thinks are not speech ("Thank you." in the quiet), and
         // short ones it is unsure of (what it makes of music: "The End"),
         // left out — each logged, with why.

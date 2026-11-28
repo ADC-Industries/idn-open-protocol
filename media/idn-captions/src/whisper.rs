@@ -49,14 +49,7 @@ unsafe extern "C" fn abort_trampoline(data: *mut std::ffi::c_void) -> bool {
 /// whisper's settings for a pass.
 fn full_params(p: &PassParams) -> FullParams<'_, '_> {
     let mut f = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    let threads = if p.threads > 0 {
-        p.threads
-    } else {
-        std::thread::available_parallelism()
-            .map_or(4, |n| n.get())
-            .saturating_sub(2)
-            .max(1)
-    };
+    let threads = crate::cpu_threads(p.threads);
     f.set_n_threads(threads as i32);
     f.set_language(Some(&p.lang));
     f.set_single_segment(true);

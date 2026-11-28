@@ -42,7 +42,8 @@ impl Service {
     pub fn state(&self) -> Value {
         let show_v = self.show_version.load(std::sync::atomic::Ordering::Relaxed);
         let mut s = self.sw.state();
-        // The engine's version and the show's changes together (see the long poll).
+        // The engine's version (the timers' seconds count) and the show's changes together
+        // (see the long poll): a client showing timers sees a new version each second.
         s["version"] = json!(s["version"].as_u64().unwrap_or(0) + show_v);
         s["streams"] = self.streams.state();
         // This program's CPU use since the last look, % of one core (a client UI's footer).

@@ -349,15 +349,23 @@ pub async fn accept(mut l: Listener, core: Arc<NodeCore>) -> io::Result<()> {
         Some(s) => s,
         None => l.instance(false)?,
     };
+    // A failing connect waits before the next instance, growing while it keeps failing
+    // (it looped at once, without end, when the failure lasted).
+    let mut waits = idn_common::backoff::Backoff::new(
+        std::time::Duration::from_millis(50),
+        std::time::Duration::from_secs(2),
+    );
     loop {
         // A client that came and went before it was taken (ERROR_NO_DATA), or a failure to
         // make the next instance, is that connection's, not the Node's: returning here
         // stopped the whole Node.
         if let Err(e) = server.connect().await {
             core.log(&format!("program connection not taken: {e}"));
+            tokio::time::sleep(waits.next()).await;
             server = next_instance(&l, &core).await;
             continue;
         }
+        waits.reset();
         let connected = std::mem::replace(&mut server, next_instance(&l, &core).await);
         let mut pid = 0u32;
         // SAFETY: a live pipe handle; `pid` receives the client's process id.

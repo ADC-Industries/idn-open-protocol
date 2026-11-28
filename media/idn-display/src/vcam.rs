@@ -275,27 +275,70 @@ mod mf {
             shm::HEIGHT,
             shm::FPS
         );
-        let input = Input::open(InputConfig {
-            receiver_name: cfg.receiver_name.clone(),
-            secure: cfg.secure.clone(),
-            discovery_server: cfg.discovery_server.clone(),
-            skip_late: true,
-            audio_channels: Some(Vec::new()),
-            ..InputConfig::new(&cfg.source)
-        })
-        .map_err(|e| format!("{}: {e}", cfg.source))?;
+        // The source is received and decoded only while an app has the camera open: the
+        // shared memory is there then (the media source makes it and holds it). Looked for
+        // every 500 ms while it isn't; while it is, let go and opened again every 5 s
+        // (this program's handle alone keeps it, so an app that closed the camera shows as
+        // it being gone), and the source let go with it.
+        let open_input = || {
+            Input::open(InputConfig {
+                receiver_name: cfg.receiver_name.clone(),
+                secure: cfg.secure.clone(),
+                discovery_server: cfg.discovery_server.clone(),
+                skip_late: true,
+                audio_channels: Some(Vec::new()),
+                ..InputConfig::new(&cfg.source)
+            })
+            .map_err(|e| format!("{}: {e}", cfg.source))
+        };
+        let mut input: Option<Input> = None;
         let mut shared: Option<Shared> = None;
-        let mut looked = Instant::now()
-            .checked_sub(Duration::from_secs(1))
-            .unwrap_or_else(Instant::now);
+        let mut looked: Option<Instant> = None;
+        // The last failure to open the source (said once, not at every look).
+        let mut open_failed: Option<String> = None;
         loop {
-            // The shared memory appears when an app opens the camera.
-            if shared.is_none() && looked.elapsed() >= Duration::from_millis(500) {
-                looked = Instant::now();
+            let every = if shared.is_some() {
+                Duration::from_secs(5)
+            } else {
+                Duration::from_millis(500)
+            };
+            if looked.is_none_or(|t| t.elapsed() >= every) {
+                looked = Some(Instant::now());
+                // (Ours let go first: else ours alone would keep it there.)
+                drop(shared.take());
                 shared = Shared::open();
             }
-            if let Some(InputEvent::Video(v)) = input.recv(Duration::from_millis(100))
-                && let Some(s) = &shared
+            if shared.is_none() {
+                if input.take().is_some() {
+                    eprintln!("idn-display: IDN Camera closed by the app: the source let go");
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            if input.is_none() {
+                match open_input() {
+                    Ok(i) => {
+                        input = Some(i);
+                        open_failed = None;
+                    }
+                    // Not the camera's end: the shared memory let go too, and both tried
+                    // again at the next look.
+                    Err(e) => {
+                        if open_failed.as_deref() != Some(e.as_str()) {
+                            eprintln!("idn-display: IDN Camera: {e}; trying again");
+                            open_failed = Some(e);
+                        }
+                        drop(shared.take());
+                        std::thread::sleep(Duration::from_millis(100));
+                        continue;
+                    }
+                }
+            }
+            let Some(s) = &shared else {
+                continue;
+            };
+            if let Some(i) = &input
+                && let Some(InputEvent::Video(v)) = i.recv(Duration::from_millis(100))
             {
                 s.write(&shm::pack_nv12(&v.picture.planes, s.width, s.height));
             }

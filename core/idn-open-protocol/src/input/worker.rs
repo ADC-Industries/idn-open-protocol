@@ -75,8 +75,17 @@ impl Worker {
             ));
             quic_ids = Some(server.ids());
             let (tx, stop, epoch) = (tx.clone(), stop.clone(), media_epoch.clone());
+            let events = queue.clone();
             threads.push(std::thread::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
+                    // The endpoint is gone and will never deliver again: end this thread
+                    // (the input carries on over its other transports).
+                    if server.ended() {
+                        events.push(InputEvent::Log(
+                            "QUIC media endpoint ended; no more QUIC media".into(),
+                        ));
+                        return;
+                    }
                     for e in server.poll() {
                         // Media marked with the session they came in under (F5-1).
                         let m = match e {
@@ -442,12 +451,22 @@ impl Worker {
                     at.saturating_duration_since(Instant::now())
                         .min(Duration::from_millis(50))
                 })
-                // A pipelined decoder's pictures are collected as they finish.
-                .min(if self.decoder.is_some() {
-                    Duration::from_millis(5)
-                } else {
-                    Duration::from_millis(50)
-                });
+                // A pipelined decoder's pictures are collected as they finish: while
+                // access units given to it within the last second still wait for their
+                // pictures. An idle decoder (or one holding a stream's last pictures until
+                // more input comes) is not looked at every 5 ms.
+                .min(
+                    if self.decoder.is_some()
+                        && self
+                            .codec_meta
+                            .back()
+                            .is_some_and(|m| m.3.elapsed() < Duration::from_secs(1))
+                    {
+                        Duration::from_millis(5)
+                    } else {
+                        Duration::from_millis(50)
+                    },
+                );
             let msg = match self.rx.recv_timeout(wait) {
                 Ok(Incoming::Resolved(r)) => {
                     if !self.on_resolved(r, &mut retry_at) {

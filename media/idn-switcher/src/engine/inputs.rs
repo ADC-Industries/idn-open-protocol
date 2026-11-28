@@ -13,6 +13,15 @@ fn wanted_now(slot: &Slot, idle_after: Duration) -> bool {
             .is_some_and(|t| t.elapsed() < idle_after)
 }
 
+impl Slot {
+    /// Wakes its worker if it sleeps unused (after `stop` is set: taken through `used_at`'s
+    /// lock, so the worker either sees `stop` or is already waiting).
+    pub(super) fn wake_unused(&self) {
+        drop(self.used_at.lock_ok());
+        self.use_changed.notify_all();
+    }
+}
+
 /// A network input's worker (§S.3): connected while it is in use (or kept active), its
 /// pictures and sound received ([`receive`]); disconnected once it has been unused for
 /// [`SwitcherConfig::idle_after`], its last picture dropped, and connected again when it
@@ -27,9 +36,19 @@ pub(super) fn connection(slot: &Arc<Slot>, shared: &std::sync::Weak<Shared>) {
     };
     let mut refused = idn_open_protocol::log::Throttle::new(Duration::from_secs(30));
     while !slot.stop.load(Ordering::Relaxed) {
-        if !wanted_now(slot, idle_after) {
-            std::thread::sleep(Duration::from_millis(50));
-            continue;
+        {
+            // Unused: asleep until it comes into use (the frame clock), is kept active, or
+            // stops, all of which notify `use_changed` (checked and waited on under
+            // `used_at`'s lock, so none is missed; the timeout only a safety net).
+            let used = slot.used_at.lock_ok();
+            let wanted = slot.keep_active.load(Ordering::Relaxed)
+                || used.is_some_and(|t| t.elapsed() < idle_after);
+            if !wanted {
+                if !slot.stop.load(Ordering::Relaxed) {
+                    let _ = slot.use_changed.wait_timeout(used, Duration::from_secs(1));
+                }
+                continue;
+            }
         }
         // The compositor's GPU as it is now (it may have failed since the input was added).
         #[allow(unused_mut)]
@@ -518,13 +537,22 @@ pub(super) fn delay_worker(slot: &Arc<Slot>, shared: &std::sync::Weak<Shared>) {
 pub(super) fn filters_tick(sh: &Arc<Shared>) {
     let (num, den) = (sh.cfg.fps.0.max(1) as u64, sh.cfg.fps.1.max(1) as u64);
     let period = Duration::from_nanos(1_000_000_000 * den / num);
+    // No input with moving filters at the last look: looked at again a few times a second
+    // rather than each frame (a scroll added starts within a quarter second).
+    let mut idle = false;
     while !sh.stop.load(Ordering::Relaxed) {
-        std::thread::sleep(period);
+        std::thread::sleep(if idle {
+            period.max(Duration::from_millis(250))
+        } else {
+            period
+        });
+        idle = true;
         let slots: Vec<Arc<Slot>> = sh.inputs.lock_ok().values().cloned().collect();
         for slot in slots {
             let Some(chain) = slot.filters.lock_ok().clone().filter(|c| c.animated()) else {
                 continue;
             };
+            idle = false;
             let raw = slot.raw.lock_ok().clone();
             if let Some((f, at)) = raw.filter(|(_, at)| at.elapsed() >= period) {
                 let out = Arc::new(chain.apply(&f, filter_time()));

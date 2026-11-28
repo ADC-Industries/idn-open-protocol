@@ -394,15 +394,23 @@ impl Clock {
                     .spawn(move || {
                         let mut buf = [0u8; 512];
                         while !stop.load(Ordering::Relaxed) {
-                            if let Ok((n, mono)) = recv_timed(&sock, &mut buf) {
-                                let at = site_at(&clock, mono);
-                                if wanted(protocol, &buf[..n], &me) {
-                                    let _ = tx.send(Packet {
-                                        data: buf[..n].to_vec(),
-                                        at,
-                                        is_event,
-                                    });
+                            match recv_timed(&sock, &mut buf) {
+                                Ok((n, mono)) => {
+                                    let at = site_at(&clock, mono);
+                                    if wanted(protocol, &buf[..n], &me) {
+                                        let _ = tx.send(Packet {
+                                            data: buf[..n].to_vec(),
+                                            at,
+                                            is_event,
+                                        });
+                                    }
                                 }
+                                // A lasting error would otherwise spin this loop; the
+                                // timeout and one-off errors retry at once.
+                                Err(e) if !idn_common::backoff::retry_at_once(&e) => {
+                                    std::thread::sleep(Duration::from_millis(50))
+                                }
+                                Err(_) => {}
                             }
                         }
                     })?,

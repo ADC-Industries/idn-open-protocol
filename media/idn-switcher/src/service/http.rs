@@ -43,7 +43,8 @@ impl Service {
         idn_open_protocol::web::engine::events_as(self, ws, Who::host(""));
     }
 
-    /// The version a client holds: the engine's, the show's and undo's, the streams'.
+    /// The version a client holds: the engine's (the timers' seconds count), the show's and
+    /// undo's, the streams'.
     fn quick_version(&self) -> u64 {
         self.sw.version()
             + self.show_version.load(std::sync::atomic::Ordering::Relaxed)
@@ -76,6 +77,7 @@ impl idn_open_protocol::web::engine::Engine for Service {
         let (streams0, media0) = (self.streams.state(), self.media.state());
         for _ in 0..timeout.as_secs().max(1) {
             let show_v = self.show_version.load(std::sync::atomic::Ordering::Relaxed);
+            // (The engine's version moves on the timers' seconds too.)
             if self
                 .sw
                 .wait_change(after.saturating_sub(show_v), Duration::from_secs(1))

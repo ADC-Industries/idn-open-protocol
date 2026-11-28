@@ -282,6 +282,13 @@ pub(super) fn scene_worker(shared: &std::sync::Weak<Shared>, mut drawer: SceneDr
         if sh.stop.load(Ordering::Relaxed) || sh.clock_runs.load(Ordering::Relaxed) != run {
             return;
         }
+        // No scenes: nothing to draw, looked at again a few times a second rather than
+        // each frame.
+        if sh.scenes.lock_ok().is_empty() {
+            drop(sh);
+            std::thread::sleep(period.max(Duration::from_millis(100)));
+            continue;
+        }
         let clock = *sh.frame_clock.lock_ok();
         let lead = (making + making / 4 + Duration::from_millis(2)).clamp(period / 2, period * 2);
         let (_, wake) = next_frame(clock, period, lead, Instant::now());

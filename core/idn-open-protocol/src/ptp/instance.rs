@@ -194,7 +194,18 @@ pub(super) fn run(
                 .unwrap_or(bmca_at)
                 .min(bmca_at)
                 .saturating_duration_since(now);
-            if let Ok(p) = rx.recv_timeout(wait.min(Duration::from_millis(50))) {
+            let wait = wait.min(Duration::from_millis(50));
+            let p = match rx.recv_timeout(wait) {
+                Ok(p) => Some(p),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                // The receiving threads are gone: nothing more arrives, but the timers
+                // (leading) still run; wait as a timeout would instead of spinning.
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    std::thread::sleep(wait);
+                    None
+                }
+            };
+            if let Some(p) = p {
                 // To the port of the datagram's version.
                 let want = if is_v1(&p.data) {
                     ProtocolVersion::PTPv1

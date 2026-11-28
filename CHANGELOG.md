@@ -32,6 +32,45 @@ people who integrate against the crate. Newest first.
 
 ## [Unreleased]
 
+## [v0.3.8-Beta21] — 2026-11-27 (pre-release, with installers)
+
+Crates 0.3.8. The first public release with installers (Windows: IDN Media and IDN
+Industrial; Linux: `.deb` for Debian 12, Ubuntu 24.04 and 26.04). Lab-checked on Linux;
+the Windows installers are not yet checked on a Windows PC.
+
+### Fixed
+- Idle CPU (machines doing nothing should stay near 0%):
+  - mDNS announcers no longer spin a core.
+  - The Node's status no longer rebuilds, with device scans, four times a second; the
+    drivers and virtual screens are read again every 30 s or after a change.
+  - The desk's soundcheck reader sleeps until the desk takes a block instead of spinning.
+  - Processes and connections that keep failing are tried again after growing waits (up
+    to a minute) rather than every few seconds: display screens, the switcher's
+    displays, streams and MQTT broker, the desk's plugin host, the Industrial session
+    helper; the Node's IPC listener up to 2 s; IDN Data's timed-out probes up to 10
+    minutes. A lost WASAPI device
+    and an `idn audio` capture stay at 2–3 s, so a replugged interface is back quickly.
+  - The virtual camera receives and decodes the source only while an app has it open.
+  - The Industrial inbox is read again from the start only when a session subscribes, as
+    a fallback every 5 minutes while a persistent session exists, else hourly (to let go
+    of items past the hold), whatever the traffic.
+  - A QUIC input's thread ends when its endpoint has ended instead of polling it.
+  - Same-machine transports' polling wait (outside Linux) backs off from 1 ms to 4 ms
+    while nothing comes.
+  - The display service lists screens less often while none are found (10 s up to 30 s),
+    and at once after a command reads the screens or changes a screen's settings or feed.
+- The Node makes its media folder at start, so `media_send` works on a Node run by hand.
+- Captions' "CPU (N threads)" label shows the threads a pass uses, not the machine's
+  count.
+
+### Changed
+- The Site Manager's and the Node's pushed `state`: the live figures (uptime, CPU, clock
+  offset, `last_seen`) no longer make a new version as they tick; they refresh about
+  every 10 s. `GET /api/v1/state` returns the current ones.
+- Switcher: `version()`/`wait_change()` unchanged (they move on timer seconds too); the
+  new `state_version()`/`wait_state_change()` count only real changes, and the switcher's
+  own watchers (saved mixes, pending shots, setups, MQTT) use them.
+
 ## [v0.3.8-Beta18] — 2026-11-27 (pre-release, source only)
 
 Crates 0.3.8. The first release published in the public repository

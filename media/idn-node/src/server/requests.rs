@@ -186,7 +186,14 @@ impl NodeCore {
                     _ => return error("bad", "path or file: a file of the media folder"),
                 };
                 if !crate::media::inside(&dir, &path) {
-                    return error("bad", "only a file of the media folder can be sent");
+                    return error(
+                        "bad",
+                        &format!(
+                            "{}: not a file in the media folder {} (only those can be sent)",
+                            path.display(),
+                            dir.display()
+                        ),
+                    );
                 }
                 let Some(ch) = self.member.read_ok().channel.clone() else {
                     return error("no_site", "this machine isn't in a site");

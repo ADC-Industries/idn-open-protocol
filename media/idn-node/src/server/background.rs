@@ -3,24 +3,14 @@
 use super::*;
 
 /// A report's text without what changes at every read with nothing having happened: the
-/// site clock's `offset_ns`, `delay_ns` and `jitter_ns` and its `<map>` of site time; the
-/// Node's `uptime_s`, the machine's `cpu_percent`, `gpu_percent` and `mem_free`, each
-/// service's `for_s` (these
-/// made an idle Node send its whole report every 2 s; they go with the
-/// 30 s report, or with a change). For telling whether a report is worth sending again,
-/// not for sending.
+/// [`RUNNING_NUMBERS`] and the site clock's `<map>` of site time (these made an idle Node
+/// send its whole report every 2 s; they go with the 30 s report, or with a change). For
+/// telling whether a report is worth sending again, not for sending.
 fn without_running_numbers(xml: &str) -> String {
     let mut out = xml.to_owned();
-    for attr in [
-        " offset_ns=\"",
-        " delay_ns=\"",
-        " jitter_ns=\"",
-        " uptime_s=\"",
-        " cpu_percent=\"",
-        " gpu_percent=\"",
-        " mem_free=\"",
-        " for_s=\"",
-    ] {
+    for name in RUNNING_NUMBERS {
+        let attr = format!(" {name}=\"");
+        let attr = attr.as_str();
         while let Some(at) = out.find(attr) {
             let from = at + attr.len();
             let Some(len) = out[from..].find('"') else {
@@ -43,6 +33,11 @@ fn without_running_numbers(xml: &str) -> String {
 pub(super) fn site_loop(weak: std::sync::Weak<NodeCore>) {
     let (mut last, mut sent_at, mut was_connected) = (String::new(), Instant::now(), false);
     let mut next_search = Instant::now();
+    // Crash reports sent since the start (by name), when the folder was last looked at,
+    // and whether a `.sent` that couldn't be written was said.
+    let mut crashes_sent: BTreeMap<String, Instant> = BTreeMap::new();
+    let mut crashes_looked: Option<Instant> = None;
+    let mut sent_mark_said = false;
     loop {
         let Some(core) = weak.upgrade() else { return };
         if core.stop.load(Ordering::Relaxed) {
@@ -181,9 +176,17 @@ pub(super) fn site_loop(weak: std::sync::Weak<NodeCore>) {
                     e.send_to_authority(&m.with_text(&a.text));
                 }
             }
-            // Crash reports, at the first chance (§N.16).
-            if connected {
-                for p in core.crashes_to_send(!was_connected) {
+            // Crash reports, at the first chance (§N.16): the folder looked at on a new
+            // connection, when one was kept, and every minute.
+            let look = connected
+                && (!was_connected
+                    || core.crash_kept()
+                    || crashes_looked.is_none_or(|t| t.elapsed() >= CRASHES_LOOK_EVERY));
+            if look {
+                let batch = core.crashes_to_send(!was_connected, &crashes_sent);
+                // (A full batch: the rest at the next pass.)
+                crashes_looked = (batch.len() < CRASHES_AT_ONCE).then(Instant::now);
+                for p in batch {
                     let name = p
                         .file_name()
                         .and_then(|n| n.to_str())
@@ -206,7 +209,15 @@ pub(super) fn site_loop(weak: std::sync::Weak<NodeCore>) {
                             .with_attr("app", &app)
                             .with_text(&text),
                     );
-                    let _ = std::fs::write(p.with_extension("sent"), b"");
+                    crashes_sent.insert(name, Instant::now());
+                    if let Err(err) = std::fs::write(p.with_extension("sent"), b"")
+                        && !std::mem::replace(&mut sent_mark_said, true)
+                    {
+                        core.log(&format!(
+                            "crash reports: can't mark {} as sent ({err}); kept as sent in memory",
+                            p.display()
+                        ));
+                    }
                 }
             }
             was_connected = connected;
@@ -245,6 +256,12 @@ pub(super) fn site_loop(weak: std::sync::Weak<NodeCore>) {
         }
     }
 }
+
+/// How often the crash reports' folder is looked at for reports not sent yet (a report
+/// kept here is looked for at once).
+const CRASHES_LOOK_EVERY: Duration = Duration::from_secs(60);
+/// Crash reports sent at most at one pass.
+pub(super) const CRASHES_AT_ONCE: usize = 20;
 
 /// The answer to a change to the network's devices this Node can't take now.
 fn busy(id: &str) -> Element {

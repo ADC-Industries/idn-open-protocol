@@ -68,6 +68,17 @@ no output and no pace of its own:
 - `media::capabilities(&ffmpeg)`: the GPU decoder this program uses and the codecs
   FFmpeg has a configuration for there (the GPU may still refuse a profile), the codecs
   FFmpeg decodes in software, FFmpeg's version and its libraries'.
+- `media::convert(input, output, &ConvertConfig { codec, frame_rate, deinterlace,
+  max_size, video_kbps, audio_rate, audio_kbps, gpu, low_priority }, &ffmpeg, progress,
+  &cancel)`: a file made into an MP4 every player takes (H.264 or HEVC 8-bit 4:2:0 at a
+  constant frame rate, AAC stereo at 48 kHz), deinterlaced and turned upright, encoded on
+  the GPU where it can, at a low priority, faster than real time. Progress about four
+  times a second; the cancel flag stops it. It writes `OUTPUT.part` and renames it once
+  complete, so a cancelled or failed conversion leaves nothing. `ConvertResult` says the
+  encoder, size, rate, length, frames repeated, dropped and deinterlaced, and how long it
+  took. From the command line: `idn codec convert IN OUT.mp4 [--fps N] [--max WxH]
+  [--deinterlace auto|on|off] [--cpu] [--codec h264|hevc] [--kbps K]` (progress on the
+  error output each second, the result on standard output; Ctrl+C cancels).
 
 **Features.** `default` is everything. A program that only decodes (the codecs, the
 player, `media`, the gateways) builds with `default-features = false`, without these:

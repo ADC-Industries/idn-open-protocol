@@ -7,10 +7,10 @@
 //! a project keeps its sends and returns by number in any host, without a window.
 //!
 //! The audio thread only copies: a send's blocks go into a ring that a pump thread sends
-//! from every 2 ms; the Node and the receiving live on a control thread, and the audio
-//! thread takes their results without waiting (`try_lock`); a block that finds them busy
-//! is skipped (a send) or passes dry (a return). Rendering offline (faster than real time)
-//! neither sends nor returns.
+//! from every 2 ms (every 4 ms while the host sends nothing); the Node and the receiving
+//! live on a control thread, and the audio thread takes their results without waiting
+//! (`try_lock`); a block that finds them busy is skipped (a send) or passes dry (a
+//! return). Rendering offline (faster than real time) neither sends nor returns.
 
 use idn_common::sync::LockOk as _;
 use idn_open_protocol::api::{AudioBlock, Output, OutputConfig, Publisher, PublisherConfig};
@@ -30,6 +30,11 @@ pub const CHANNELS: usize = 2;
 const RING_FRAMES: usize = 48_000;
 /// How often the pump sends what the ring holds.
 const PUMP: Duration = Duration::from_millis(2);
+/// How often the pump looks at the ring once no sound has come for [`QUIET_AFTER`] (the
+/// host stopped, or not playing): the first block after it waits up to this long.
+const PUMP_QUIET: Duration = Duration::from_millis(4);
+/// No sound into the ring for this long: the pump looks less often ([`PUMP_QUIET`]).
+const QUIET_AFTER: Duration = Duration::from_millis(500);
 
 /// A return's latency unless the site sets the receiver's (§A.12): a DAW takes its sound
 /// in its own buffer's steps (often 512 frames, 10.7 ms), which the lane must ride over.
@@ -278,11 +283,17 @@ impl Engine {
         drop(live);
     }
 
-    /// A send's pump: every 2 ms, what the ring holds goes out as one block.
+    /// A send's pump: every 2 ms, what the ring holds goes out as one block (every
+    /// [`PUMP_QUIET`], 4 ms, while no sound has come for half a second: the host stopped).
     fn pump(&self, stop: &AtomicBool) {
         let mut buf: Vec<f32> = Vec::new();
+        let mut last_sound = std::time::Instant::now();
         while !stop.load(Ordering::Relaxed) {
-            std::thread::sleep(PUMP);
+            std::thread::sleep(if last_sound.elapsed() >= QUIET_AFTER {
+                PUMP_QUIET
+            } else {
+                PUMP
+            });
             {
                 let mut r = self.ring.lock_ok();
                 buf.clear();
@@ -292,6 +303,7 @@ impl Engine {
             if frames == 0 {
                 continue;
             }
+            last_sound = std::time::Instant::now();
             let Some(out) = self.output.lock_ok().clone() else {
                 continue;
             };

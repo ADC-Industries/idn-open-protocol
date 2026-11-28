@@ -232,16 +232,19 @@ fn run(socket: UdpSocket, rx: Receiver<Cmd>, weak: std::sync::Weak<Hub>, public:
             clients.retain(|c| c.sid != sid);
             hub.set_rtc_media(sid, false);
         }
-        // Wait for a packet until the soonest timeout (at most 5 ms: sound to send).
+        // Wait for a packet until the soonest timeout (at most 5 ms: sound to send). With
+        // no client there is nothing to send or time: 100 ms, which only delays the
+        // answer to a first offer (a client's packets come after its answer).
         let now = Instant::now();
-        let soonest = clients
-            .iter()
-            .map(|c| c.timeout)
-            .min()
-            .unwrap_or(now + Duration::from_millis(5));
-        let wait = soonest
-            .saturating_duration_since(now)
-            .clamp(Duration::from_millis(1), Duration::from_millis(5));
+        let wait = match clients.iter().map(|c| c.timeout).min() {
+            Some(soonest) => soonest
+                .saturating_duration_since(now)
+                .clamp(Duration::from_millis(1), Duration::from_millis(5)),
+            None => Duration::from_millis(100),
+        };
+        // The hub isn't held through the wait: Voice dropped meanwhile frees its port at
+        // once (a restart on the same port could not bind it).
+        drop(hub);
         let _ = socket.set_read_timeout(Some(wait));
         match socket.recv_from(&mut buf) {
             Ok((n, source)) => {

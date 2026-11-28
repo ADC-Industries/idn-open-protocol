@@ -963,7 +963,7 @@ impl Console {
                         let _ = r.stop();
                     }
                     store_states(&shared, false);
-                    save_desk(&shared, &mut Vec::new());
+                    save_desk(&shared, &mut workers::SavedDesk::default());
                 }
             })
         };

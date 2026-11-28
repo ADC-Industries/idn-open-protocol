@@ -151,8 +151,10 @@ impl Engine for State {
         }
     }
 
+    /// The push channel's state (`GET /api/v1/state` is answered in [`Engine::route`]
+    /// below, with the running numbers as they are now).
     fn state_for(&self, who: &Who) -> Value {
-        self.status_for(&who.user, self.role_of(who))
+        self.pushed_status_for(&who.user, self.role_of(who))
     }
 
     fn schema(&self) -> Value {
@@ -207,8 +209,20 @@ impl Engine for State {
     }
 
     fn route(this: &Arc<Self>, r: &Request, who: &Who) -> Option<Response> {
-        let logged_in = this.role_of(who).is_some();
+        let role = this.role_of(who);
+        let logged_in = role.is_some();
         let path = r.path.as_str();
+        // The state as the shared front gives it, the machines' running numbers (uptimes,
+        // ages, clock offsets) as they are now rather than as at the last change.
+        if logged_in && r.method == "GET" && path == "/api/v1/state" {
+            if let Some(after) = r.param("after").and_then(|v| v.parse::<u64>().ok()) {
+                this.wait_change(after, Duration::from_secs(20));
+            }
+            return Some(
+                Response::json(this.status_for(&who.user, role).to_string())
+                    .with("Cache-Control", "no-store"),
+            );
+        }
         let shared = match r.method.as_str() {
             // (The commands' schema to anyone, as before.)
             "GET" => path == "/api/v1/schema" || (logged_in && SHARED_GETS.contains(&path)),

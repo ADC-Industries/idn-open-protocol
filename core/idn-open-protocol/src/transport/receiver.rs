@@ -78,8 +78,16 @@ fn udp_loop(
     let mut buf = vec![0u8; 65_536];
     let mut out = Vec::new();
     while !stop.load(Ordering::Relaxed) {
-        let Ok((n, from)) = sock.recv_from(&mut buf) else {
-            continue;
+        let (n, from) = match sock.recv_from(&mut buf) {
+            Ok(got) => got,
+            Err(e) => {
+                // A lasting error (the socket broken) would otherwise spin this loop;
+                // the timeout and one-off errors retry at once.
+                if !idn_common::backoff::retry_at_once(&e) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                continue;
+            }
         };
         let d = &buf[..n];
         // A new control session: its sequence starts again (§6.5); nothing of the last

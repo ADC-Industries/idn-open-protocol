@@ -187,7 +187,19 @@ impl SiteManager {
         let mut cursor = 0u64;
         // Items at or below this were published to everyone once already.
         let mut published_upto = 0u64;
+        // The held items are read again from the start when a session subscribes (one that
+        // may take them); and, as a fallback, every [`RESCAN_EVERY`] while a persistent
+        // session exists, else every [`RESCAN_IDLE`] (items past the hold let go). The
+        // fallback's deadline is kept across passes, so traffic doesn't push it back.
+        let mut fallback = Fallback::new(std::time::Instant::now());
         loop {
+            if fallback.due(std::time::Instant::now()) {
+                // Reached here too, not only while waiting, so a site that never runs
+                // out of new items still reads the held ones again.
+                if self.fallback_fires(&mut fallback) {
+                    cursor = 0;
+                }
+            }
             let me = self.clone();
             let batch = tokio::task::spawn_blocking(move || me.inbox(cursor, 256))
                 .await
@@ -195,10 +207,18 @@ impl SiteManager {
                 .and_then(Result::ok)
                 .unwrap_or_default();
             if batch.is_empty() {
+                let deadline = tokio::time::Instant::from_std(fallback.next);
                 tokio::select! {
                     _ = ev.recv() => {}
-                    _ = self.0.rescan.notified() => cursor = 0,
-                    _ = tokio::time::sleep(Duration::from_secs(30)) => cursor = 0,
+                    _ = self.0.rescan.notified() => {
+                        cursor = 0;
+                        fallback.read_all(std::time::Instant::now());
+                    }
+                    _ = tokio::time::sleep_until(deadline) => {
+                        if self.fallback_fires(&mut fallback) {
+                            cursor = 0;
+                        }
+                    }
                 }
                 continue;
             }
@@ -232,6 +252,13 @@ impl SiteManager {
             let me = self.clone();
             let _ = tokio::task::spawn_blocking(move || me.inbox_done_all(&done)).await;
         }
+    }
+
+    /// Runs the due fallback: whether the held items are read again from the start now
+    /// (the deadline moves on either way). Asking the broker is cheap: it reads no queue.
+    fn fallback_fires(&self, fallback: &mut Fallback) -> bool {
+        let persistent = self.0.broker.has_persistent_session();
+        fallback.fire(std::time::Instant::now(), persistent)
     }
 
     pub(super) async fn hooks(self, mut hooks: tokio::sync::mpsc::UnboundedReceiver<Hook>) {
@@ -365,13 +392,19 @@ impl SiteManager {
                 &held.machine,
                 &held.response_topic,
                 &msg.props.correlation,
-                (wire::ST_ERROR, format!("the command couldn't be held: {e}").into_bytes()),
+                (
+                    wire::ST_ERROR,
+                    format!("the command couldn't be held: {e}").into_bytes(),
+                ),
             ),
             Err(e) => self.answer_command(
                 &held.machine,
                 &held.response_topic,
                 &msg.props.correlation,
-                (wire::ST_ERROR, format!("the command couldn't be held: {e}").into_bytes()),
+                (
+                    wire::ST_ERROR,
+                    format!("the command couldn't be held: {e}").into_bytes(),
+                ),
             ),
         }
     }
@@ -662,5 +695,96 @@ impl Held {
 
     fn id(&self) -> String {
         self.item().map(|i| i.id_hex()).unwrap_or_default()
+    }
+}
+
+/// The held items' fallback reading while a persistent session exists (a session
+/// subscribing reads them at once).
+const RESCAN_EVERY: Duration = Duration::from_secs(300);
+/// With no persistent session (nothing would take what is held), the fallback reading
+/// only for letting go of items past the hold.
+const RESCAN_IDLE: Duration = Duration::from_secs(3600);
+
+/// Whether the fallback reads the held items again, [`RESCAN_EVERY`] after the last
+/// fallback: with a persistent session, yes; with none, once [`RESCAN_IDLE`] passed since
+/// the last reading.
+fn fallback_rescan(persistent: bool, since_last: Duration) -> bool {
+    persistent || since_last >= RESCAN_IDLE
+}
+
+/// The inbox fallback's timing: when it next comes due and when the held items were last
+/// read from the start. Kept outside the deliver loop, so new items arriving don't restart
+/// the wait.
+struct Fallback {
+    next: std::time::Instant,
+    read: std::time::Instant,
+}
+
+impl Fallback {
+    fn new(now: std::time::Instant) -> Self {
+        Self {
+            next: now + RESCAN_EVERY,
+            read: now,
+        }
+    }
+
+    fn due(&self, now: std::time::Instant) -> bool {
+        now >= self.next
+    }
+
+    /// The held items are read from the start now (a session subscribed, or the fallback).
+    fn read_all(&mut self, now: std::time::Instant) {
+        self.read = now;
+        self.next = now + RESCAN_EVERY;
+    }
+
+    /// The fallback came due: whether to read from the start. The next one is
+    /// [`RESCAN_EVERY`] on either way.
+    fn fire(&mut self, now: std::time::Instant, persistent: bool) -> bool {
+        if fallback_rescan(persistent, now.saturating_duration_since(self.read)) {
+            self.read_all(now);
+            true
+        } else {
+            self.next = now + RESCAN_EVERY;
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod rescan_tests {
+    use super::*;
+
+    /// With no persistent session the held items aren't read again at each fallback
+    /// wait, only once the idle period passed; with one, they are.
+    #[test]
+    fn the_inbox_isnt_read_again_at_each_wait_with_no_session() {
+        assert!(!fallback_rescan(false, RESCAN_EVERY));
+        assert!(!fallback_rescan(
+            false,
+            RESCAN_IDLE - Duration::from_secs(1)
+        ));
+        assert!(fallback_rescan(false, RESCAN_IDLE));
+        assert!(fallback_rescan(true, RESCAN_EVERY));
+    }
+
+    /// New items every second (each a pass of the deliver loop) don't hold the fallback
+    /// off: with a persistent session it fires every [`RESCAN_EVERY`], with none (the
+    /// idle reading that lets expired items go) once [`RESCAN_IDLE`] passed.
+    #[test]
+    fn the_fallback_fires_however_busy_the_site_is() {
+        for (persistent, limit) in [(true, RESCAN_EVERY), (false, RESCAN_IDLE)] {
+            let t0 = std::time::Instant::now();
+            let mut fb = Fallback::new(t0);
+            let mut fired = None;
+            for s in 1..=2 * RESCAN_IDLE.as_secs() {
+                let now = t0 + Duration::from_secs(s);
+                if fb.due(now) && fb.fire(now, persistent) {
+                    fired = Some(now - t0);
+                    break;
+                }
+            }
+            assert_eq!(fired, Some(limit), "persistent: {persistent}");
+        }
     }
 }

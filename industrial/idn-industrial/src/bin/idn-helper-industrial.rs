@@ -60,6 +60,9 @@ fn main() {
     let _ = idn_common::memory::tune();
     // Its log file and crash reports (§N.16).
     idn_open_protocol::diag::init("idn-helper-industrial");
+    // The library's own lines (Voice's listeners, trust, discovery) to stderr, beside
+    // this program's: without a logger they were dropped.
+    idn_open_protocol::log::set_logger(|m| eprintln!("{m}"));
     let a = args();
     // The worker's token (loopback only): it opens the worker's endpoint and nothing
     // else. (The API token itself is the service's and administrators' only.)

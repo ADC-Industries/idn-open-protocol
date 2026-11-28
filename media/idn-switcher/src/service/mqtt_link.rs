@@ -382,6 +382,9 @@ impl MqttLink {
 
     /// The connection, made again when it drops or the settings change.
     fn run(self: Arc<Self>, api: Weak<Service>) {
+        // The wait before connecting again after the connection failed or dropped: 3 s,
+        // growing to a minute while the broker can't be reached; 3 s again once connected.
+        let mut again = reconnect_backoff();
         loop {
             if api.upgrade().is_none() {
                 return;
@@ -436,6 +439,7 @@ impl MqttLink {
                 }
                 match conn.recv_timeout(Duration::from_millis(500)) {
                     Ok(Ok(Event::Incoming(Incoming::ConnAck(_)))) => {
+                        again.reset();
                         self.set_status(format!("connected to {host}:{port}"));
                         let _ = client.subscribe(format!("{base}/cmd/+"), QoS::AtLeastOnce);
                         for t in &cfg.triggers {
@@ -472,7 +476,7 @@ impl MqttLink {
                             "{host}:{port}: the broker disconnected ({:?})",
                             d.reason_code
                         ));
-                        std::thread::sleep(Duration::from_secs(3));
+                        self.pause(&api, at_version, again.next());
                         break;
                     }
                     Ok(Ok(_)) => {}
@@ -481,13 +485,34 @@ impl MqttLink {
                         // stream" (lab 397): said plainly, the library's words after.
                         self.set_status(format!("not connected to {host}:{port}: {e}"));
                         *self.client.lock_ok() = None;
-                        std::thread::sleep(Duration::from_secs(3));
+                        self.pause(&api, at_version, again.next());
                         break;
                     }
-                    Err(_) => {}
+                    Err(rumqttc::v5::RecvTimeoutError::Timeout) => {}
+                    // The connection's requests ended: it can't go on (taken at once
+                    // again, this loop would spin); a new one after the wait.
+                    Err(rumqttc::v5::RecvTimeoutError::Disconnected) => {
+                        self.set_status(format!("not connected to {host}:{port}"));
+                        *self.client.lock_ok() = None;
+                        self.pause(&api, at_version, again.next());
+                        break;
+                    }
                 }
             }
             *self.client.lock_ok() = None;
+        }
+    }
+
+    /// Waits `wait` before connecting again, cut short by new settings or the service's
+    /// end.
+    fn pause(&self, api: &Weak<Service>, at_version: u64, wait: Duration) {
+        let end = std::time::Instant::now() + wait;
+        while self.version.load(Ordering::SeqCst) == at_version && api.strong_count() > 0 {
+            let left = end.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return;
+            }
+            std::thread::sleep(left.min(Duration::from_millis(250)));
         }
     }
 
@@ -606,6 +631,11 @@ fn not_from_mqtt(cmd: &str) -> Option<&'static str> {
     )
 }
 
+/// The waits before connecting to the broker again: 3 s, doubling, up to a minute.
+fn reconnect_backoff() -> idn_common::backoff::Backoff {
+    idn_common::backoff::Backoff::new(Duration::from_secs(3), Duration::from_secs(60))
+}
+
 /// What was last published, by part (to publish only what changed).
 static SAID: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
 
@@ -620,19 +650,48 @@ fn shape(v: &Value) -> Value {
     }
 }
 
-/// The state, as it changes, every quarter of a second. The streams' counters change all
-/// the time: a change of their state goes at once, their numbers at most every 5 s (each
+/// The state, as it changes, at most every quarter of a second. The whole state is built
+/// only when something may have changed: a new version of the engine's state (waited on:
+/// it wakes this at once), of the show or the streams, the streams' own state (looked at
+/// each second), a new connection, or every 5 s (the streams' counters, which change all
+/// the time: a change of their state goes at once, their numbers at most every 5 s; each
 /// retained message is a write to the broker's disk).
-fn publish_state(link: Weak<MqttLink>, api: Weak<Service>) {
+fn publish_state(link: Weak<MqttLink>, api_weak: Weak<Service>) {
+    const PACE: Duration = Duration::from_millis(250);
+    const NUMBERS: Duration = Duration::from_secs(5);
     let mut streams_at: Option<(Value, std::time::Instant)> = None;
+    // At the last whole build: the versions, the streams' shape, and when.
+    let mut built: Option<(u64, Value, std::time::Instant)> = None;
+    let mut engine_v = 0u64;
+    let mut looked = std::time::Instant::now();
     loop {
-        std::thread::sleep(Duration::from_millis(250));
-        let (Some(l), Some(api)) = (link.upgrade(), api.upgrade()) else {
+        std::thread::sleep(PACE.saturating_sub(looked.elapsed()));
+        let Some(v) = super::files::wait_change_weak(&api_weak, engine_v, Duration::from_secs(1))
+        else {
+            return;
+        };
+        engine_v = v;
+        looked = std::time::Instant::now();
+        let (Some(l), Some(api)) = (link.upgrade(), api_weak.upgrade()) else {
             return;
         };
         let Some(c) = l.client.lock_ok().clone() else {
             continue;
         };
+        let versions = api.sw.state_version()
+            + api.show_version.load(Ordering::Relaxed)
+            + *api.streams.version.lock_ok();
+        let streams_shape = shape(&api.streams.state());
+        // (A new connection starts with nothing said: everything goes again.)
+        let fresh = SAID.lock_ok().is_empty();
+        if !fresh
+            && built.as_ref().is_some_and(|(bv, bs, at)| {
+                *bv == versions && *bs == streams_shape && at.elapsed() < NUMBERS
+            })
+        {
+            continue;
+        }
+        built = Some((versions, streams_shape, std::time::Instant::now()));
         let base = l.cfg.lock_ok().base_topic();
         let s = api.state();
         let mut said = SAID.lock_ok();
@@ -663,6 +722,9 @@ fn publish_state(link: Weak<MqttLink>, api: Weak<Service>) {
             {
                 said.retain(|(n, _)| *n != name);
                 said.push((name, text));
+            } else {
+                // (Its queue full: tried again at the next look, not in 5 s.)
+                built = None;
             }
         }
     }
@@ -671,6 +733,17 @@ fn publish_state(link: Weak<MqttLink>, api: Weak<Service>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A broker that can't be reached is tried again after 3 s, then longer, up to a
+    /// minute.
+    #[test]
+    fn reconnects_back_off() {
+        let mut b = reconnect_backoff();
+        let secs: Vec<u64> = (0..7).map(|_| b.next().as_secs()).collect();
+        assert_eq!(secs, [3, 6, 12, 24, 48, 60, 60]);
+        b.reset();
+        assert_eq!(b.next(), Duration::from_secs(3));
+    }
 
     #[test]
     fn filters_addresses_and_settings() {

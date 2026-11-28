@@ -115,6 +115,11 @@ impl ServiceAnnouncer {
         for i in &ifaces {
             let _ = sock.join_multicast_v4(&MDNS_GROUP, i);
         }
+        // The loop waits in recv_from: blocking with a 100 ms timeout (udp_socket's are
+        // non-blocking, for the browser's poll; here a would-block came back at once and
+        // the thread spun a core).
+        sock.set_nonblocking(false)?;
+        sock.set_read_timeout(Some(Duration::from_millis(100)))?;
         let shared = Arc::new(Shared {
             service: service.to_owned(),
             host: super::hostname(),
@@ -222,6 +227,7 @@ fn announce_loop(sock: UdpSocket, ifaces: Vec<Ipv4Addr>, sh: &Shared) {
             // (A read timeout, as Windows tells it too (`TimedOut`): no wait, nothing came;
             // it was taken as an error and waited 200 ms more; bug run B.)
             Err(e) if crate::transport::is_poll_timeout(&e) => {}
+            Err(e) if idn_common::backoff::retry_at_once(&e) => {}
             Err(_) => std::thread::sleep(Duration::from_millis(200)),
         }
     }
@@ -295,6 +301,45 @@ pub fn find(service: &str, timeout: Duration) -> Vec<Found> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CPU ticks (user + system) of this process's threads named `name`, from /proc.
+    #[cfg(target_os = "linux")]
+    fn thread_ticks(name: &str) -> Option<u64> {
+        let mut total = None;
+        for t in std::fs::read_dir("/proc/self/task").ok()?.flatten() {
+            let comm = std::fs::read_to_string(t.path().join("comm")).unwrap_or_default();
+            if comm.trim_end() != name {
+                continue;
+            }
+            let stat = std::fs::read_to_string(t.path().join("stat")).ok()?;
+            // After the ")" that ends the name: fields 3 on; utime and stime are 14 and 15.
+            let rest = stat.rsplit_once(") ")?.1;
+            let f: Vec<&str> = rest.split_whitespace().collect();
+            let (u, s): (u64, u64) = (f.get(11)?.parse().ok()?, f.get(12)?.parse().ok()?);
+            *total.get_or_insert(0) += u + s;
+        }
+        total
+    }
+
+    /// An announcer with nothing to answer waits in its socket rather than spinning a core
+    /// (Beta18 lab: an idle Node used 100 % of one).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_idle_announcer_sleeps() {
+        let Ok(a) = ServiceAnnouncer::start("_idn-idle-test._tcp.local") else {
+            return; // (no mDNS socket here)
+        };
+        a.set(vec![("Idle test".into(), 9)]);
+        std::thread::sleep(Duration::from_millis(300));
+        let Some(before) = thread_ticks("idn-service-mdns") else {
+            return;
+        };
+        std::thread::sleep(Duration::from_secs(2));
+        let after = thread_ticks("idn-service-mdns").unwrap_or(before);
+        // Spinning was about 200 ticks (two seconds of a core at 100 Hz); waiting, ~0.
+        let used = after.saturating_sub(before);
+        assert!(used < 40, "{used} ticks in 2 s");
+    }
 
     #[test]
     fn records_hold_each_instance_as_one_label() {

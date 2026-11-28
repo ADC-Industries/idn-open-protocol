@@ -19,6 +19,9 @@ pub fn snapshot_of(xml: &str) -> Option<String> {
         .filter(|n| !n.is_empty())
 }
 
+/// How often the desk's output is looked at for receivers' messages.
+const POLL: Duration = Duration::from_millis(50);
+
 /// Watches the desk's output for snapshots; stops when dropped.
 pub struct Cues {
     /// Its thread, stopped and waited for with it.
@@ -60,7 +63,9 @@ impl Cues {
                                 ),
                             });
                         }
-                        std::thread::sleep(Duration::from_millis(20));
+                        // (No wakeup to wait on: looked at every [`POLL`], 50 ms, so a cue's
+                        // recall comes within 50 ms.)
+                        std::thread::sleep(POLL);
                     }
                 })?
         };

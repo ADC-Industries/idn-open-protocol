@@ -175,10 +175,20 @@ impl AudioReceiver {
         self.routes.lock_ok().clone()
     }
 
-    /// Waits up to `timeout` for the routes to change; the new routes if they did.
+    /// Waits up to `timeout` for the routes to change; the new routes if they did. Once no
+    /// change can come any more (the Node connection's watch is gone) it still waits the
+    /// whole `timeout`, so a loop around it does not spin.
     pub fn wait_change(&self, timeout: Duration) -> Option<Vec<Route>> {
         let rx = self.changes.lock_ok();
-        let mut latest = rx.recv_timeout(timeout).ok()?;
+        let mut latest = match rx.recv_timeout(timeout) {
+            Ok(r) => r,
+            Err(mpsc::RecvTimeoutError::Timeout) => return None,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                drop(rx);
+                std::thread::sleep(timeout);
+                return None;
+            }
+        };
         while let Ok(r) = rx.try_recv() {
             latest = r;
         }

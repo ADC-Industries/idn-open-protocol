@@ -24,6 +24,9 @@ impl Service {
                     };
                     e.feed_at = idn_common::epoch::secs();
                     self.save(&g);
+                    // A new feed: a screen waiting to be started again starts at once.
+                    g.came_up(&name);
+                    g.list_soon();
                     self.bump(&mut g);
                 } else if let Some(r) = g.running.get_mut(&name) {
                     // The same feed again: sent again, so a screen that gave up (its
@@ -107,6 +110,9 @@ impl Service {
                 if e.settings != s {
                     e.settings = s.clone();
                     self.save(&g);
+                    // New settings: a screen waiting to be started again starts at once.
+                    g.came_up(&name);
+                    g.list_soon();
                     self.bump(&mut g);
                 }
                 Ok(json!({"screen": name, "settings": s}))
@@ -116,6 +122,8 @@ impl Service {
                 if !(0.5..=600.0).contains(&secs) {
                     return Err("seconds: 0.5 to 600".into());
                 }
+                // (The screens listed again soon: one plugged in since shows up.)
+                g.list_soon();
                 let names: Vec<String> = match &screen {
                     ScreenRef::Name(s) if s == "all" => {
                         g.screens.iter().map(|s| s.name.clone()).collect()
@@ -171,6 +179,8 @@ impl Service {
                 {
                     return Err("seconds: 1 to 3600 (none: until turned off)".into());
                 }
+                // (The screens listed again soon: one plugged in since shows up.)
+                g.list_soon();
                 let names: Vec<String> = match &screen {
                     ScreenRef::Name(s) if s == "all" => {
                         g.screens.iter().map(|s| s.name.clone()).collect()
@@ -193,7 +203,7 @@ impl Service {
                 // Its process ended; started again at the next look (its feed and
                 // settings sent to the new one).
                 let was = g.running.remove(&name).is_some();
-                g.failed.remove(&name);
+                g.came_up(&name);
                 self.event(&mut g, "restarted", &name, json!({"was_running": was}));
                 self.bump(&mut g);
                 Ok(json!({"screen": name, "was_running": was}))

@@ -108,7 +108,12 @@ pub(super) fn tally(
     for (id, slot) in inputs {
         let used = full.contains(id) || tiles.contains_key(id);
         if used {
-            *slot.used_at.lock_ok() = Some(now);
+            let was = slot.used_at.lock_ok().replace(now);
+            // Coming into use (not used in the frames just before): its worker, asleep
+            // while it was unused, wakes to connect.
+            if was.is_none_or(|t| now.saturating_duration_since(t) > Duration::from_millis(500)) {
+                slot.use_changed.notify_all();
+            }
         }
         let input = slot.input.lock_ok().clone();
         let Some(input) = input else {

@@ -474,8 +474,35 @@ impl Switcher {
         v
     }
 
-    /// Waits until the state changes past `after` (or `timeout`); the version then.
+    /// Waits until the version ([`version`](Self::version)) moves past `after` (or
+    /// `timeout`): any change, the timers' seconds moving on included; the version then.
     pub fn wait_change(&self, after: u64, timeout: Duration) -> u64 {
+        let ticks = &self.shared.timer_ticks;
+        let s = self.shared.state.lock_ok();
+        let (s, _) = self
+            .shared
+            .changed
+            .wait_timeout_while(s, timeout, |s| {
+                s.version + ticks.load(Ordering::Relaxed) <= after
+            })
+            .unwrap();
+        s.version + ticks.load(Ordering::Relaxed)
+    }
+
+    /// The version of the state's real changes: as [`version`](Self::version), but the
+    /// timers' seconds moving on don't count. For watchers that act on what changed
+    /// (keeping the setup saved, publishing to a broker), which would otherwise build the
+    /// whole state again each second while a timer runs. A UI that shows timers uses
+    /// [`version`](Self::version) and [`wait_change`](Self::wait_change). Its numbers are
+    /// its own: not comparable with [`version`](Self::version)'s.
+    pub fn state_version(&self) -> u64 {
+        self.shared.state.lock_ok().version
+    }
+
+    /// Waits until the state really changes past `after` ([`state_version`](
+    /// Self::state_version); the timers' seconds don't count), or `timeout`; the state
+    /// version then.
+    pub fn wait_state_change(&self, after: u64, timeout: Duration) -> u64 {
         let s = self.shared.state.lock_ok();
         let (s, _) = self
             .shared

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// `idn-codec` in IDN's programs folder (this program's, or the one a program hosting
 /// IDN set).
@@ -85,8 +85,17 @@ impl StreamIn {
             std::thread::Builder::new()
                 .name("idn-switcher-stream".into())
                 .spawn(move || {
+                    // The wait before starting it again: 3 s, growing to a minute while it
+                    // keeps ending (a dead address); back to 3 s once it receives, or ran
+                    // a minute.
+                    let mut again = restart_backoff();
+                    let mut started = Instant::now();
                     while !inner.stop.load(Ordering::Relaxed) {
                         std::thread::sleep(Duration::from_millis(500));
+                        if again.current().is_some() && inner.status.lock_ok().state == "receiving"
+                        {
+                            again.reset();
+                        }
                         let ended = {
                             let mut r = inner.running.lock_ok();
                             match r.as_mut().map(|r| r.child.try_wait()) {
@@ -99,12 +108,17 @@ impl StreamIn {
                             }
                         };
                         if ended && !inner.stop.load(Ordering::Relaxed) {
-                            // Again after 3 s (a stream that keeps failing waits between),
-                            // the wait ended by a stop (a removal doesn't wait it out).
+                            if started.elapsed() >= Duration::from_secs(60) {
+                                again.reset();
+                            }
+                            // Again after the wait (a stream that keeps failing waits
+                            // longer each time), the wait ended by a stop (a removal
+                            // doesn't wait it out).
                             idn_open_protocol::audio::pace::sleep_unless_stopped(
-                                Duration::from_secs(3),
+                                again.next(),
                                 &inner.stop,
                             );
+                            started = Instant::now();
                             if !inner.stop.load(Ordering::Relaxed)
                                 && let Err(e) = spawn(&inner)
                             {
@@ -130,6 +144,12 @@ impl StreamIn {
     pub fn status(&self) -> StreamStatus {
         self.inner.status.lock_ok().clone()
     }
+}
+
+/// The waits before a stream input's program is started again: 3 s, doubling while it
+/// keeps ending, up to a minute.
+fn restart_backoff() -> idn_common::backoff::Backoff {
+    idn_common::backoff::Backoff::new(Duration::from_secs(3), Duration::from_secs(60))
 }
 
 fn spawn(inner: &Arc<Inner>) -> std::io::Result<()> {
@@ -195,6 +215,16 @@ impl Drop for StreamIn {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    /// A stream that keeps ending is started again after 3 s, then longer, up to a minute.
+    #[test]
+    fn restarts_back_off() {
+        let mut b = restart_backoff();
+        let secs: Vec<u64> = (0..7).map(|_| b.next().as_secs()).collect();
+        assert_eq!(secs, [3, 6, 12, 24, 48, 60, 60]);
+        b.reset();
+        assert_eq!(b.next(), Duration::from_secs(3));
+    }
 
     /// A stand-in for idn-codec: prints two status lines, then ends with a reason.
     #[test]

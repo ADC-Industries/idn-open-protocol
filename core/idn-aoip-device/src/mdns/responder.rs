@@ -355,7 +355,7 @@ impl Responder {
                         let (svc, host) = &*sh.lock_ok();
                         announce_named(&so, svc, host, ip, &names);
                     }
-                    let Ok((n, from)) = so.recv_from(&mut buf) else {
+                    let Some((n, from)) = crate::server::recv(&so, &mut buf) else {
                         continue;
                     };
                     let Some(q) = dns::parse(&buf[..n]) else {

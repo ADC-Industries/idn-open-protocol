@@ -740,6 +740,17 @@ impl Broker {
         v
     }
 
+    /// Whether any persistent session (session expiry above 0) is held, connected or
+    /// not. Cheap: reads no queue.
+    pub fn has_persistent_session(&self) -> bool {
+        self.0
+            .state
+            .lock_ok()
+            .sessions
+            .values()
+            .any(|s| s.expiry_s > 0)
+    }
+
     /// Persistent sessions and the messages waiting for each.
     pub fn waiting(&self) -> HashMap<String, usize> {
         let names: HashSet<String> = self

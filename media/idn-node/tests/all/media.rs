@@ -136,7 +136,7 @@ fn a_media_file_goes_to_another_machine_of_the_site() {
             .with_attr("file", "../../outside/secret.txt"),
     ] {
         let err = a.request(e).unwrap_err().to_string();
-        assert!(err.contains("only a file of the media folder"), "{err}");
+        assert!(err.contains("only those can be sent"), "{err}");
     }
     // Sent by name: B's Node accepts and fetches it into its media folder.
     let r = a

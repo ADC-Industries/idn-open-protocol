@@ -118,7 +118,7 @@ pub(crate) fn browse(
                 Err(_) => return,
             },
             None => {
-                let Ok((n, from)) = socket.recv_from(&mut buf) else {
+                let Some((n, from)) = crate::server::recv(&socket, &mut buf) else {
                     continue;
                 };
                 let (Some(m), IpAddr::V4(from)) = (dns::parse(&buf[..n]), from.ip()) else {

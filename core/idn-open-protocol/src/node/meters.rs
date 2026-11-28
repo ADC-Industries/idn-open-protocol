@@ -139,17 +139,29 @@ fn registry() -> &'static Mutex<Vec<Weak<Meter>>> {
     R.get_or_init(Mutex::default)
 }
 
+/// How long the reporter sleeps at a time while no levels are wanted; a request wakes it
+/// at once.
+const IDLE: Duration = Duration::from_secs(1);
+
 /// The thread that reports, started the first time levels are wanted; it sleeps while
-/// they aren't.
+/// they aren't, and is woken by each request.
 fn start_reporter() {
     static STARTED: AtomicBool = AtomicBool::new(false);
+    static REPORTER: OnceLock<std::thread::Thread> = OnceLock::new();
     if STARTED.swap(true, Ordering::Relaxed) {
+        if let Some(t) = REPORTER.get() {
+            t.unpark();
+        }
         return;
     }
-    let _ = std::thread::Builder::new()
+    let started = std::thread::Builder::new()
         .name("idn-meters".into())
         .spawn(|| {
             loop {
+                if !on() {
+                    std::thread::park_timeout(IDLE);
+                    continue;
+                }
                 std::thread::sleep(EVERY);
                 if !on() {
                     continue;
@@ -171,6 +183,9 @@ fn start_reporter() {
                 }
             }
         });
+    if let Ok(h) = started {
+        let _ = REPORTER.set(h.thread().clone());
+    }
 }
 
 #[cfg(test)]

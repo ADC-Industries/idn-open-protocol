@@ -17,6 +17,8 @@
 //!   (R.12; `idn ingest`).
 //! - `idn-codec link serve | connect HOST`: the site link between a main site and a
 //!   remote one over the internet (R.18; `idn link`).
+//! - `idn-codec convert IN OUT`: a media file made into an MP4 every player takes
+//!   (`idn_ffmpeg::media::convert`; `idn codec convert`).
 //!
 //! Needs access to the GPU's render node (the `render` group).
 
@@ -37,6 +39,7 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "gpu")]
 mod bench;
 mod capture;
+mod convert;
 mod ingest;
 mod link;
 mod listen;
@@ -92,6 +95,9 @@ const USAGE: &str = "usage: idn-codec probe\n\
      \x20                     [--trust-dir DIR --name NAME [--site-server HOST (the authority's; default --discovery-server)]] [--no-node]\n\
      \x20                     serve: [--trust-upstream HOST[:PORT] (the site authority, default the Discovery Server)]\n\
      \x20                     connect: [--campus-server PORT|off (the campus's Discovery Server; default 5959)]\n\
+     \x20      idn-codec convert IN OUT.mp4 [--fps N|N/D] [--max WxH] [--deinterlace auto|on|off] [--cpu] [--codec h264|hevc]\n\
+     \x20                     [--kbps K (video; default by size and rate)] [--audio-kbps K (192)] [--audio-rate 44100|48000|96000 (48000)]\n\
+     \x20                     [--normal-priority (default: low)]   (progress on stderr each second; Ctrl+C cancels, no output left)\n\
      \x20      idn-codec recv <ip[:port] | \"HOST (source)\"> [--seconds S] [--allow] [--max-size WxH] [--decoder auto|gpu|software]\n\
      \x20                     [--codecs h264,hevc,av1] [--frame-log FILE.csv (one line per picture)] [--no-node]\n\
      \x20                     [--save-picture N FILE.y4m (the Nth picture as decoded, for checking it)]\n\
@@ -109,7 +115,7 @@ fn main() {
     idn_open_protocol::log::set_logger(|m| eprintln!("{m}"));
     // Its log file and crash reports (§N.16).
     idn_open_protocol::diag::init("idn-codec");
-    idn_open_protocol::shutdown::install();
+    idn_open_protocol::shutdown::install_for_command();
     idn_ffmpeg::keep_frame_memory();
     let mut args = idn_open_protocol::cli::Args::new(USAGE);
     match args.next().as_deref() {
@@ -123,6 +129,7 @@ fn main() {
         Some("view") => view(args),
         Some("listen") => listen(args),
         Some("record") => record(args),
+        Some("convert") => convert::convert(args),
         Some("voice-feed") => voice::voice_feed(args),
         Some("voice-out") => voice::voice_out(args),
         _ => args.help(),

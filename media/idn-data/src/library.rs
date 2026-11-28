@@ -7,16 +7,17 @@
 //! the panel's changes (titles, tags, folders, uploads, deletes).
 
 use crate::downloads::{Downloads, JobState, folder_in};
+use idn_common::backoff::Backoff;
 use idn_common::cmd::RunWithin as _;
 use idn_common::sync::LockOk as _;
 use idn_open_protocol::library::{self as lib, META_DIR, META_FILE};
 use serde_json::{Map, Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A program next to this one (the Windows installer puts FFmpeg's there), else the
 /// system's.
@@ -133,6 +134,14 @@ pub fn thumbnail(path: &Path, kind: &str, duration: Option<f64>, to: &Path) -> b
         && to.exists()
 }
 
+/// Whether a request's state is its last: done, failed or cancelled.
+fn finished(state: &Value) -> bool {
+    matches!(
+        state["state"].as_str(),
+        Some("done" | "failed" | "cancelled")
+    )
+}
+
 /// The library at `dir`, kept by IDN Data.
 pub struct Library {
     dir: PathBuf,
@@ -141,7 +150,27 @@ pub struct Library {
     writing: Mutex<()>,
     /// Requests being downloaded: request id → download job.
     jobs: Mutex<BTreeMap<String, u64>>,
+    /// Requests seen finished (their `N.state` done, failed or cancelled): not read
+    /// again each second.
+    finished: Mutex<HashSet<String>>,
+    /// Items whose `ffprobe` ran out of time: not probed again until their wait is over
+    /// (growing while it keeps running out), or their file changes.
+    probe_waits: Mutex<HashMap<String, ProbeWait>>,
     stop: Arc<AtomicBool>,
+}
+
+/// An item whose probe ran out of time: the file it was (size, time), when to try again,
+/// and the waits.
+struct ProbeWait {
+    file: (u64, u64),
+    next: Instant,
+    waits: Backoff,
+}
+
+/// The waits before an item whose probe ran out of time is probed again: the next
+/// refresh (20 s), then longer each time, up to 10 minutes.
+fn probe_backoff() -> Backoff {
+    Backoff::new(Duration::from_secs(20), Duration::from_secs(600))
 }
 
 impl Library {
@@ -151,6 +180,8 @@ impl Library {
             downloads,
             writing: Mutex::new(()),
             jobs: Mutex::new(BTreeMap::new()),
+            finished: Mutex::new(HashSet::new()),
+            probe_waits: Mutex::new(HashMap::new()),
             stop: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -213,18 +244,41 @@ impl Library {
     pub fn refresh(&self) {
         let cat = lib::scan(&self.dir, "");
         let known = lib::read_meta(&self.dir);
+        let null = Value::Null;
         let mut fresh: Vec<(String, Value)> = Vec::new();
         for it in &cat.items {
-            let k = &known.get(&it.id).cloned().unwrap_or_default();
+            let k = known.get(&it.id).unwrap_or(&null);
             if k["size"].as_u64() == Some(it.size) && k["modified"].as_u64() == Some(it.modified) {
                 continue;
             }
             let path = self.dir.join(&it.id);
             let p = if it.kind == "sound" || it.kind == "video" || it.kind == "picture" {
-                let p = probe(&path);
-                if p.is_none() && PROBE_TIMED_OUT.with(|t| t.get()) {
+                let file = (it.size, it.modified);
+                // Its probe ran out of time lately, the file as it was: not yet again.
+                if self
+                    .probe_waits
+                    .lock_ok()
+                    .get(&it.id)
+                    .is_some_and(|w| w.file == file && Instant::now() < w.next)
+                {
                     continue;
                 }
+                let p = probe(&path);
+                if p.is_none() && PROBE_TIMED_OUT.with(|t| t.get()) {
+                    let mut waits = self.probe_waits.lock_ok();
+                    let w = waits.entry(it.id.clone()).or_insert_with(|| ProbeWait {
+                        file,
+                        next: Instant::now(),
+                        waits: probe_backoff(),
+                    });
+                    if w.file != file {
+                        w.file = file;
+                        w.waits.reset();
+                    }
+                    w.next = Instant::now() + w.waits.next();
+                    continue;
+                }
+                self.probe_waits.lock_ok().remove(&it.id);
                 p.unwrap_or_default()
             } else {
                 Value::Null
@@ -247,7 +301,8 @@ impl Library {
                 }),
             ));
         }
-        let ids: Vec<String> = cat.items.iter().map(|i| i.id.clone()).collect();
+        let ids: HashSet<String> = cat.items.iter().map(|i| i.id.clone()).collect();
+        self.probe_waits.lock_ok().retain(|id, _| ids.contains(id));
         let gone = known.keys().any(|k| !ids.contains(k));
         if fresh.is_empty() && !gone {
             return;
@@ -280,11 +335,17 @@ impl Library {
         let Ok(rd) = std::fs::read_dir(&rdir) else {
             return;
         };
+        // The requests there now (a finished one whose files went is forgotten).
+        let mut present = HashSet::new();
         for e in rd.filter_map(Result::ok) {
             let name = e.file_name().to_string_lossy().into_owned();
             let Some(id) = name.strip_suffix(".json") else {
                 continue;
             };
+            present.insert(id.to_owned());
+            if self.finished.lock_ok().contains(id) {
+                continue;
+            }
             let state = rdir.join(format!("{id}.state"));
             let job = self.jobs.lock_ok().get(id).copied();
             let v = match job {
@@ -295,7 +356,8 @@ impl Library {
                         .ok()
                         .and_then(|b| serde_json::from_slice(&b).ok())
                         .unwrap_or_default();
-                    if matches!(st["state"].as_str(), Some("done" | "failed" | "cancelled")) {
+                    if finished(&st) {
+                        self.finished.lock_ok().insert(id.to_owned());
                         continue;
                     }
                     json!({"state": "failed", "error": "IDN Data restarted during the download: ask again"})
@@ -347,8 +409,11 @@ impl Library {
                 },
             };
             // Every second while it downloads: whole, but not synced to the disk each time.
-            let _ = idn_common::fsutil::write_quick(&state, v.to_string());
+            if idn_common::fsutil::write_quick(&state, v.to_string()).is_ok() && finished(&v) {
+                self.finished.lock_ok().insert(id.to_owned());
+            }
         }
+        self.finished.lock_ok().retain(|id| present.contains(id));
     }
 
     /// The catalog as the panel shows it.
@@ -516,6 +581,22 @@ fn numbered(name: &str, k: u32) -> String {
 mod tests {
     use super::*;
     use crate::ytdlp::YtDlp;
+
+    /// A file whose probe keeps running out of time is probed at the next refresh, then
+    /// less and less often, up to every 10 minutes; a request's last states are known.
+    #[test]
+    fn probe_waits_grow_and_finished_requests() {
+        let mut b = probe_backoff();
+        let secs: Vec<u64> = (0..7).map(|_| b.next().as_secs()).collect();
+        assert_eq!(secs, [20, 40, 80, 160, 320, 600, 600]);
+        for st in ["done", "failed", "cancelled"] {
+            assert!(finished(&json!({"state": st})));
+        }
+        for st in ["queued", "downloading", "finishing"] {
+            assert!(!finished(&json!({"state": st})));
+        }
+        assert!(!finished(&Value::Null));
+    }
 
     #[test]
     fn titles_tags_folders_moves_uploads_and_deletes() {

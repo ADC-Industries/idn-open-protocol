@@ -245,6 +245,11 @@ impl SiteMqtt {
         self.broker.remove_user(name)
     }
 
+    /// Whether the broker listens (the machines are published only then).
+    pub fn running(&self) -> bool {
+        self.running.lock_ok().is_some()
+    }
+
     /// The site's machines from the panel's status (its `machines`): published where they
     /// changed, and an event for each machine that came, went, joined or left.
     pub fn publish_machines(&self, status: &Value) {

@@ -976,11 +976,13 @@ impl Hub {
             if !text.is_empty() {
                 a.text = text;
             }
+            // Each press counts and moves the latest time (§V.13.7: first and latest);
+            // one merged into the last within `sos_merge_s` doesn't alert dispatch again.
+            a.count += 1;
+            a.time_ms = now;
             if quiet {
                 return Ok(a.id);
             }
-            a.count += 1;
-            a.time_ms = now;
             a.from = from.clone();
             a.sent = Instant::now();
             a.id

@@ -23,7 +23,7 @@ clean-room, from public documentation and black-box testing, without vendor code
 
   See [docs/INTEGRATION.md](docs/INTEGRATION.md) for the guide, and
   [CHANGELOG.md](CHANGELOG.md) for versioning and what to depend on — pin the tagged
-  release **`v0.3.8-Beta18`** (a pre-release), not `main`. For the API reference, run
+  release **`v0.3.8-Beta21`** (a pre-release), not `main`. For the API reference, run
   `scripts/build-docs.sh` and open `docs/api/index.html` (static HTML, works offline);
   if you depend on the crate, `cargo doc -p idn-open-protocol` from your own workspace
   builds the same reference, so you don't need this repo's script.
@@ -70,9 +70,37 @@ The library keeps what every program needs, including how a program talks to its
 `idn-node`, the Site Manager in `idn-site-manager`. `release-keys.txt` (the keys every
 build trusts) stays at the top.
 
-Build with `cargo build --release`; test with `cargo test --release`. The NDI|HX
-compatibility tests need ffmpeg with libx264 and libx265 and are skipped without them;
-set `IDN_REQUIRE_FFMPEG=1` to make a missing ffmpeg a test failure instead.
+## Building from source
+
+Linux: Ubuntu 24.04 or newer, or Debian 13. (Debian 12 can't build it: its FFmpeg is 5.1
+and IDN needs 6.1 or newer, and its Vulkan headers lack `VK_EXT_layer_settings`. The
+packages built here still install on Debian 12; they bring their own FFmpeg.)
+
+1. Rust from [rustup](https://rustup.rs) (stable), and git.
+2. The system packages (Ubuntu/Debian names):
+
+   ```sh
+   sudo apt install build-essential pkg-config cmake clang libclang-dev \
+     libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libpcsclite-dev \
+     libobs-dev libavutil-dev libavcodec-dev libavformat-dev libswscale-dev \
+     libswresample-dev libavfilter-dev libavdevice-dev libvulkan-dev glslc \
+     libxkbcommon-dev libwayland-dev libudev-dev
+   ```
+
+3. Every program and library: `cargo build --release --workspace` (a plain
+   `cargo build --release` builds only the `idn-open-protocol` library, the workspace's
+   default member). On a 4-core machine this takes about 10 minutes and about 3 GB of
+   `target/`. The programs are in `target/release/` (`idn`, `idn-node`,
+   `idn-site-manager`, `idn-switcher`, …); `target/release/idn doctor` checks the machine.
+4. One crate: `cargo build --release -p idn-open-protocol` (the library alone needs only
+   Rust and a C compiler).
+
+Windows builds are cross-compiled from Linux (`scripts/setup-windows-kit.sh`, then
+`scripts/package.sh`); building natively on Windows isn't covered yet.
+
+Test with `cargo test --release --workspace`. The NDI|HX compatibility tests need ffmpeg
+with libx264 and libx265 and are skipped without them; set `IDN_REQUIRE_FFMPEG=1` to make
+a missing ffmpeg a test failure instead.
 
 ## Trademarks
 

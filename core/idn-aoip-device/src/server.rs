@@ -152,7 +152,7 @@ impl Server {
                 let mut buf = vec![0u8; 2048];
                 let mut last_check: Option<Instant> = None;
                 while !st.load(Ordering::Relaxed) {
-                    let Ok((len, from)) = arc_s.recv_from(&mut buf) else {
+                    let Some((len, from)) = recv(&arc_s, &mut buf) else {
                         continue;
                     };
                     // A name another device on the network has: refused, not taken (bug
@@ -254,7 +254,7 @@ impl Server {
             s.keep(spawn("idn-aoip-flowctl", move || {
                 let mut buf = vec![0u8; 2048];
                 while !st.load(Ordering::Relaxed) {
-                    let Ok((len, from)) = flow_s.recv_from(&mut buf) else {
+                    let Some((len, from)) = recv(&flow_s, &mut buf) else {
                         continue;
                     };
                     let (reply, event) = {
@@ -289,7 +289,7 @@ impl Server {
                 let mut buf = vec![0u8; 2048];
                 let mut said: std::collections::HashMap<[u8; 8], Instant> = Default::default();
                 while !st.load(Ordering::Relaxed) {
-                    let Ok((len, from)) = set_s.recv_from(&mut buf) else {
+                    let Some((len, from)) = recv(&set_s, &mut buf) else {
                         continue;
                     };
                     let Some(asked) = settings::asked(&buf[..len]) else {
@@ -374,7 +374,7 @@ impl Server {
             s.keep(spawn("idn-aoip-cmc", move || {
                 let mut buf = vec![0u8; 2048];
                 while !st.load(Ordering::Relaxed) {
-                    let Ok((len, from)) = cmc_s.recv_from(&mut buf) else {
+                    let Some((len, from)) = recv(&cmc_s, &mut buf) else {
                         continue;
                     };
                     let req = &buf[..len];
@@ -545,6 +545,21 @@ fn bundles(d: &Device) -> Vec<(usize, u16, usize)> {
         }
     }
     v
+}
+
+/// One datagram; `None` on the read timeout or an error. An error that may last (the
+/// socket broken, the interface gone) waits 200 ms first, so the receive loop around it
+/// does not spin.
+pub(crate) fn recv(sock: &UdpSocket, buf: &mut [u8]) -> Option<(usize, SocketAddr)> {
+    match sock.recv_from(buf) {
+        Ok(got) => Some(got),
+        Err(e) => {
+            if !idn_common::backoff::retry_at_once(&e) {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            None
+        }
+    }
 }
 
 fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> io::Result<std::thread::JoinHandle<()>> {
